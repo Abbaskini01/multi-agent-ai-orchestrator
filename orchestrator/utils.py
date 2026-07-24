@@ -1,7 +1,22 @@
 import os
 import re
+import difflib
 import urllib.request
 import urllib.parse
+
+
+def compute_git_diff(old_code: str, new_code: str, filename: str) -> str:
+    """Generates standard unified git diff format between two code versions."""
+    old_lines = old_code.splitlines(keepends=True)
+    new_lines = new_code.splitlines(keepends=True)
+    diff_lines = list(difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=f"a/{filename}",
+        tofile=f"b/{filename}"
+    ))
+    return "".join(diff_lines)
+
 
 def clean_extracted_code(output_text: str) -> str:
     """Isolates raw Python code from markdown wraps and fixes over-escaped newlines."""
@@ -15,7 +30,6 @@ def clean_extracted_code(output_text: str) -> str:
         else:
             output_text = output_text.strip()
             
-    # Fix double-escaped literal \n sequences if code was over-escaped in JSON
     if "\\n" in output_text and "\n" not in output_text:
         output_text = output_text.replace("\\n", "\n")
         

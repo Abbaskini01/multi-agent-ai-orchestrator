@@ -1,7 +1,8 @@
 import json
 from orchestrator.config import llm
 from orchestrator.state import OrchestratorState, ProjectTask
-from orchestrator.utils import clean_extracted_code
+from orchestrator.utils import clean_extracted_code, compute_git_diff
+
 
 def executor_node(state: OrchestratorState) -> dict:
     """Specialized Executor Agent: Generates initial task files OR performs targeted surgical repairs."""
@@ -27,11 +28,13 @@ def executor_node(state: OrchestratorState) -> dict:
             "CRITICAL JSON FORMATTING RULES:\n"
             "1. You MUST respond with a single, valid JSON object containing a key called 'files'.\n"
             "2. 'files' must be an array of objects, each having 'filename' and 'code' keys.\n"
-            "3. The 'code' property must contain valid, executable Python code as a standard JSON string.\n\n"
-            "CRITICAL PYTHON SYNTAX RULES:\n"
-            "1. MULTILINE STRINGS: When writing SQL statements or multi-line text in Python, ALWAYS use triple quotes (\"\"\"...\"\"\") "
-            "or keep them on a single line.\n"
-            "2. SURGICAL REPAIR: Modify ONLY the specific file(s) causing the failure."
+            "3. STRICT JSON STRING FORMATTING: The 'code' property MUST be a standard JSON string enclosed in single double-quotes (\"). "
+            "NEVER use Python triple quotes (\"\"\") to enclose the JSON string value for 'code'! "
+            "Escape all double quotes inside the code as \\\" and represent newlines as standard \\n.\n\n"
+            "CRITICAL PYTHON CODING RULES:\n"
+            "1. MULTILINE STRINGS: For SQL queries or multi-line text, ALWAYS use Python triple quotes (\"\"\"...\"\"\").\n"
+            "2. ARGPARSE TESTING: If writing a `parse_args` function, ALWAYS define it as `def parse_args(args=None): ... return parser.parse_args(args)` so CLI arguments can be tested programmatically.\n"
+            "3. SURGICAL REPAIR: Modify ONLY the specific file(s) causing the failure."
         )
 
         user_prompt = (
@@ -64,6 +67,15 @@ def executor_node(state: OrchestratorState) -> dict:
                     fcode = clean_extracted_code(fix["code"])
                     for i, t in enumerate(updated_tasks):
                         if t["filename"] == fname:
+                            old_code = t["generated_code"]
+                            
+                            diff_text = compute_git_diff(old_code, fcode, fname)
+                            if diff_text:
+                                print(f"\n[Git Patch Generated for '{fname}']")
+                                print("--------------------------------------------------")
+                                print(diff_text.strip())
+                                print("--------------------------------------------------")
+
                             updated_tasks[i] = ProjectTask(
                                 filename=fname,
                                 task_description=t["task_description"],
@@ -96,9 +108,9 @@ def executor_node(state: OrchestratorState) -> dict:
         f"{task_desc}\n\n"
         f"Requirement: '{state['user_requirement']}'\n\n"
         f"CRITICAL CODING RULES:\n"
-        f"1. For SQL or multi-line strings, ALWAYS use Python triple quotes (\"\"\"...\"\"\").\n"
-        f"2. For interactive loops, wrap `input()` in `try ... except (EOFError, KeyboardInterrupt): break` so automated runners exit cleanly.\n"
-        f"3. If you use argparse, ensure default values are provided for arguments.\n\n"
+        f"1. For interactive loops, wrap `input()` in `try ... except (EOFError, KeyboardInterrupt): break` so automated runners exit cleanly.\n"
+        f"2. If writing `parse_args`, ALWAYS define it as `def parse_args(args=None): ... return parser.parse_args(args)`.\n"
+        f"3. For SQL queries, ALWAYS use Python triple quotes (\"\"\"...\"\"\").\n\n"
         f"Return ONLY raw Python code for this file without markdown wraps."
     )
     

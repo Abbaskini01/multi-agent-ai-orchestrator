@@ -7,6 +7,7 @@ from orchestrator.config import llm
 from orchestrator.state import OrchestratorState
 from orchestrator.utils import clean_extracted_code
 
+
 def syntax_tester_node(state: OrchestratorState) -> dict:
     """Gate 1: Static AST Syntax Verification."""
     print("\n[Node Activating] ---> Per-File Syntax Tester Node")
@@ -74,12 +75,19 @@ def functional_tester_node(state: OrchestratorState) -> dict:
         codebase_context += f"\nFile: {t['filename']}\n```python\n{t['generated_code']}\n```\n"
 
     test_gen_prompt = (
-        "Generate an executable `unittest` script named `test_suite.py` that validates the code against acceptance criteria.\n"
-        "STRICT RULES:\n"
-        "1. Test backend data methods directly. Do NOT assert on print stdout.\n"
-        "2. Do NOT call main driver loops.\n"
-        "3. Wrap CLI argparse exit checks in `with self.assertRaises(SystemExit):`.\n"
-        "Return ONLY raw Python code.\n\n"
+        "You are a QA automation engineer generating an executable `unittest` script named `test_suite.py`.\n\n"
+        "STRICT UNITTEST GENERATION RULES:\n"
+        "1. DIRECT CLASS IMPORTS: Import database and logic classes directly from their defining module "
+        "(e.g., `from database import Database`).\n"
+        "2. NO INTERACTIVE LOOPS: NEVER import or execute `main()`, driver loops, or functions that trigger `input()`. "
+        "Test ONLY class methods, return values, and data mutations in isolation.\n"
+        "3. EXPLICIT ARGPARSE ARGS: When unit testing `parse_args()`, ALWAYS pass an explicit list of string arguments "
+        "(e.g., `parse_args([])` or `parse_args(['--database', 'test.db'])`). NEVER call `parse_args()` without arguments inside unittest because `sys.argv` contains test arguments!\n"
+        "4. NO CUSTOM EXCEPTION ASSERTS: Do NOT assert that methods raise custom exception types unless explicitly raised in source.\n"
+        "5. NO STDOUT MATCHING: Test object state and methods directly. Do NOT use stdout mocks or string prints.\n"
+        "6. ISOLATED DB INSTANCES: Instantiate database classes directly using custom temp filenames or `:memory:`.\n"
+        "7. CLI EXITS: Wrap invalid argparse CLI calls in `with self.assertRaises(SystemExit):`.\n\n"
+        "Return ONLY raw Python code for `test_suite.py` without markdown wraps.\n\n"
         f"Acceptance Criteria:\n{json.dumps(criteria, indent=2)}\n\n"
         f"Codebase Context:\n{codebase_context}"
     )
