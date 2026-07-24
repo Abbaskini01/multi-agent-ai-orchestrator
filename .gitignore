@@ -1,23 +1,28 @@
-# Environment and secrets
+# Security & Environment Variables
 .env
 .env.*
 !.env.example
 
-# Virtual environments
+# Virtual Environments
 venv/
 .venv/
+env/
 
-# Python bytecode and caches
+# Python Cache & Bytecode
 __pycache__/
-*.py[cod]
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache/
 .coverage
 
-# OS files
+# Runtime Databases & Local Generated Outputs
+*.db
+expenses.db
+generated_projects/
+
+# IDE & OS Temporary Files
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
-
-# Local databases
-*.db
-*.sqlite3
