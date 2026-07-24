@@ -1,7 +1,8 @@
 import json
-from orchestrator.config import llm
+from orchestrator.config import invoke_llm_with_fallback
 from orchestrator.state import OrchestratorState, ProjectTask
 from orchestrator.utils import clean_extracted_code, compute_git_diff
+from orchestrator.ast_parser import build_codebase_symbol_map
 
 
 def executor_node(state: OrchestratorState) -> dict:
@@ -18,13 +19,20 @@ def executor_node(state: OrchestratorState) -> dict:
     # -----------------------------------------------------------------
     if error_message:
         print(f"-> Self-Correction Triggered (Attempt #{retry_count}). Analyzing for targeted repair...")
+        
+        ast_symbol_map = build_codebase_symbol_map(tasks)
+        print("\n[AST Codebase Symbol Index Generated]")
+        print("--------------------------------------------------")
+        print(ast_symbol_map.strip())
+        print("--------------------------------------------------")
+
         codebase_context = ""
         for t in tasks:
             codebase_context += f"\nFile: {t['filename']}\n```python\n{t['generated_code']}\n```\n"
 
         fix_system_prompt = (
             "You are an expert Python engineer debugging a multi-file project workspace.\n"
-            "Analyze the error trace log and the existing multi-file codebase.\n\n"
+            "Analyze the error trace log, the AST Codebase Symbol Index, and the multi-file source code.\n\n"
             "CRITICAL JSON FORMATTING RULES:\n"
             "1. You MUST respond with a single, valid JSON object containing a key called 'files'.\n"
             "2. 'files' must be an array of objects, each having 'filename' and 'code' keys.\n"
@@ -32,13 +40,19 @@ def executor_node(state: OrchestratorState) -> dict:
             "NEVER use Python triple quotes (\"\"\") to enclose the JSON string value for 'code'! "
             "Escape all double quotes inside the code as \\\" and represent newlines as standard \\n.\n\n"
             "CRITICAL PYTHON CODING RULES:\n"
-            "1. MULTILINE STRINGS: For SQL queries or multi-line text, ALWAYS use Python triple quotes (\"\"\"...\"\"\").\n"
-            "2. ARGPARSE TESTING: If writing a `parse_args` function, ALWAYS define it as `def parse_args(args=None): ... return parser.parse_args(args)` so CLI arguments can be tested programmatically.\n"
-            "3. SURGICAL REPAIR: Modify ONLY the specific file(s) causing the failure."
+            "1. SYMBOL ALIGNMENT: Match function and class signatures across files as defined in the AST Symbol Index.\n"
+            "2. INTERACTIVE LOOPS: ALL interactive menu loops MUST support simple numeric options (1, 2, 3, 4...) and MUST wrap `input()` calls in a `try ... except (EOFError, KeyboardInterrupt): break` block so automated execution exits cleanly on EOF.\n"
+            "3. MULTILINE STRINGS: For SQL queries or multi-line text, ALWAYS use Python triple quotes (\"\"\"...\"\"\").\n"
+            "4. ARGPARSE TESTING: If writing `parse_args`, define it as `def parse_args(args=None): ... return parser.parse_args(args)`.\n"
+            "5. SURGICAL REPAIR: Modify ONLY the specific file(s) causing the failure."
         )
 
         user_prompt = (
             f"Requirement: '{state['user_requirement']}'\n\n"
+            f"AST Codebase Symbol Map:\n"
+            f"--------------------------------------------------\n"
+            f"{ast_symbol_map}\n"
+            f"--------------------------------------------------\n\n"
             f"Validation Failure Error Trace:\n"
             f"--------------------------------------------------\n"
             f"{error_message}\n"
@@ -48,8 +62,9 @@ def executor_node(state: OrchestratorState) -> dict:
             f"Identify the root cause, fix ONLY the affected file(s), and return valid JSON."
         )
 
-        response = llm.bind(response_format={"type": "json_object"}).invoke(
-            [("system", fix_system_prompt), ("human", user_prompt)]
+        response = invoke_llm_with_fallback(
+            [("system", fix_system_prompt), ("human", user_prompt)],
+            response_format={"type": "json_object"}
         )
 
         try:
@@ -108,13 +123,13 @@ def executor_node(state: OrchestratorState) -> dict:
         f"{task_desc}\n\n"
         f"Requirement: '{state['user_requirement']}'\n\n"
         f"CRITICAL CODING RULES:\n"
-        f"1. For interactive loops, wrap `input()` in `try ... except (EOFError, KeyboardInterrupt): break` so automated runners exit cleanly.\n"
+        f"1. For interactive loops, ALWAYS use simple numeric menu choices (1, 2, 3, 4...) and wrap `input()` in `try ... except (EOFError, KeyboardInterrupt): break` so automated runners exit cleanly.\n"
         f"2. If writing `parse_args`, ALWAYS define it as `def parse_args(args=None): ... return parser.parse_args(args)`.\n"
         f"3. For SQL queries, ALWAYS use Python triple quotes (\"\"\"...\"\"\").\n\n"
         f"Return ONLY raw Python code for this file without markdown wraps."
     )
     
-    response = llm.invoke(programmer_prompt)
+    response = invoke_llm_with_fallback(programmer_prompt)
     
     updated_tasks = list(tasks)
     updated_tasks[idx] = ProjectTask(

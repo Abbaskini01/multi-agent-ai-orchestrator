@@ -1,5 +1,5 @@
 import json
-from orchestrator.config import llm
+from orchestrator.config import invoke_llm_with_fallback
 from orchestrator.state import OrchestratorState, ProjectTask
 
 
@@ -13,7 +13,7 @@ def planner_node(state: OrchestratorState) -> dict:
     if feedback:
         print(f"-> Incorporating Human Feedback into Blueprint: '{feedback}'")
     else:
-        print("-> Requesting structured JSON plan and acceptance criteria from Groq (Llama 3.3)...")
+        print("-> Requesting structured JSON plan and acceptance criteria from LLM...")
 
     architect_system_prompt = (
         "You are an elite software architect. Analyze the user requirement "
@@ -31,8 +31,9 @@ def planner_node(state: OrchestratorState) -> dict:
     if feedback:
         user_prompt += f"\nHuman Feedback / Requested Changes: '{feedback}'"
 
-    response = llm.bind(response_format={"type": "json_object"}).invoke(
-        [("system", architect_system_prompt), ("human", user_prompt)]
+    response = invoke_llm_with_fallback(
+        [("system", architect_system_prompt), ("human", user_prompt)],
+        response_format={"type": "json_object"}
     )
 
     try:
@@ -50,7 +51,7 @@ def planner_node(state: OrchestratorState) -> dict:
             "acceptance_criteria": raw_criteria,
             "tasks": structured_tasks,
             "current_task_index": 0,
-            "human_feedback": ""  # Reset feedback once processed
+            "human_feedback": ""
         }
     except Exception as err:
         print(f"-> Critical Failure: Planner JSON parse error: {err}")
