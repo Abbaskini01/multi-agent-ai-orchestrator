@@ -1,109 +1,109 @@
-import json
-from langgraph.graph import StateGraph, START, END
+import sys
+from orchestrator.graph import app as orchestrator_graph
 
-from orchestrator.state import OrchestratorState
-from orchestrator.planner import planner_node
-from orchestrator.hitl import human_approval_node
-from orchestrator.executor import executor_node
-from orchestrator.validators import (
-    syntax_tester_node,
-    runtime_tester_node,
-    functional_tester_node,
-)
-from orchestrator.exporter import filesystem_exporter_node
-from orchestrator.notifier import notification_node
-from orchestrator.router import (
-    route_after_human_approval,
-    route_after_executor,
-    route_after_syntax,
-    route_after_runtime,
-    route_after_functional,
-)
 
-# Wire the LangGraph state graph
-workflow = StateGraph(OrchestratorState)
+def display_hitl_checkpoint(state: dict) -> str:
+    """Renders the Version 2 Human-In-The-Loop Approval Checkpoint."""
+    proj_name = state.get("project_name", "GeneratedApp")
+    arch_pattern = state.get("architecture_pattern", "Layered Architecture")
+    folders = state.get("folders", [])
+    criteria = state.get("acceptance_criteria", [])
+    tasks = state.get("tasks", [])
 
-# Register nodes
-workflow.add_node("planner_agent", planner_node)
-workflow.add_node("human_approval_agent", human_approval_node)
-workflow.add_node("executor_agent", executor_node)
-workflow.add_node("syntax_tester_agent", syntax_tester_node)
-workflow.add_node("runtime_tester_agent", runtime_tester_node)
-workflow.add_node("functional_tester_agent", functional_tester_node)
-workflow.add_node("filesystem_exporter_agent", filesystem_exporter_node)
-workflow.add_node("notification_agent", notification_node)
+    print("\n==================================================")
+    print("=== ⏸️  HUMAN-IN-THE-LOOP APPROVAL CHECKPOINT ===")
+    print("==================================================")
+    print(f"\n📦 PROJECT: {proj_name}")
+    print(f"🏛️  ARCHITECTURE PATTERN: {arch_pattern}")
 
-# Map linear edges
-workflow.add_edge(START, "planner_agent")
-workflow.add_edge("planner_agent", "human_approval_agent")
-workflow.add_edge("filesystem_exporter_agent", "notification_agent")
-workflow.add_edge("notification_agent", END)
+    print("\n📂 PROPOSED DIRECTORY SCAFFOLDING:")
+    for f in folders:
+        print(f"   📁 {f}/")
 
-# Map conditional routing switches
-workflow.add_conditional_edges(
-    "human_approval_agent",
-    route_after_human_approval,
-    {
-        "executor_agent": "executor_agent",
-        "planner_agent": "planner_agent",
-        "notification_agent": "notification_agent"
-    }
-)
-workflow.add_conditional_edges(
-    "executor_agent",
-    route_after_executor,
-    {
-        "executor_agent": "executor_agent",
-        "syntax_tester_agent": "syntax_tester_agent"
-    }
-)
-workflow.add_conditional_edges(
-    "syntax_tester_agent",
-    route_after_syntax,
-    {
-        "executor_agent": "executor_agent",
-        "runtime_tester_agent": "runtime_tester_agent",
-        "notification_agent": "notification_agent"
-    }
-)
-workflow.add_conditional_edges(
-    "runtime_tester_agent",
-    route_after_runtime,
-    {
-        "executor_agent": "executor_agent",
-        "functional_tester_agent": "functional_tester_agent",
-        "notification_agent": "notification_agent"
-    }
-)
-workflow.add_conditional_edges(
-    "functional_tester_agent",
-    route_after_functional,
-    {
-        "executor_agent": "executor_agent",
-        "filesystem_exporter_agent": "filesystem_exporter_agent",
-        "notification_agent": "notification_agent"
-    }
-)
+    print("\n📋 PROPOSED ACCEPTANCE CRITERIA:")
+    for i, c in enumerate(criteria, 1):
+        print(f"   {i}. {c}")
 
-orchestrator_app = workflow.compile()
+    print("\n📄 PROPOSED REPOSITORY FILE ARCHITECTURE:")
+    for i, t in enumerate(tasks, 1):
+        print(f"   {i}. {t['filename']} -> {t['task_description']}")
 
-if __name__ == "__main__":
+    print("\n--------------------------------------------------")
+    print("Options:")
+    print("   [A] Approve blueprint & proceed to Scaffolding & Code Generation")
+    print("   [M] Modify blueprint (Provide custom feedback for Architect)")
+    print("   [Q] Quit / Abort execution")
+    print("--------------------------------------------------")
+    
+    try:
+        choice = input("Enter choice ([A]/M/Q): ").strip().upper()
+    except (EOFError, KeyboardInterrupt):
+        choice = "Q"
+
+    return choice if choice in ["A", "M", "Q"] else "A"
+
+
+def main():
     print("====================================================")
-    print("=== Launching HITL-Enabled AI Orchestrator       ===")
+    print("=== Launching V2 Repository AI Orchestrator      ===")
     print("====================================================")
 
-    initial_input = {
-        "user_requirement": (
-            "Build a minimal command-line Python expense tracker app. "
-            "It must split into a database layout component and a main application driver loop file."
-        ),
+    user_req = (
+        "Build a minimal command-line Python expense tracker app. "
+        "It must split into a database layout component and a main application driver loop file."
+    )
+
+    initial_state = {
+        "user_requirement": user_req,
+        "project_name": "",
+        "architecture_pattern": "",
+        "folders": [],
+        "acceptance_criteria": [],
+        "tasks": [],
+        "current_task_index": 0,
+        "error_message": "",
+        "retry_count": 0,
         "human_feedback": "",
         "is_approved": False
     }
 
-    final_output_state = orchestrator_app.invoke(initial_input)
+    # Run Planner to generate Blueprint
+    config = {"configurable": {"thread_id": "session-v2-1"}}
+    
+    # Execute until HITL checkpoint
+    state = orchestrator_graph.invoke(initial_state, config=config)
+
+    # Interactive Approval Loop
+    while not state.get("is_approved", False):
+        choice = display_hitl_checkpoint(state)
+
+        if choice == "A":
+            print("\n-> Blueprint Approved by User! Resuming automated pipeline...")
+            state["is_approved"] = True
+            state["human_feedback"] = ""
+            # Resume graph execution
+            state = orchestrator_graph.invoke(state, config=config)
+            break
+        elif choice == "M":
+            try:
+                feedback = input("\nEnter custom instructions for the Architect Agent: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if feedback:
+                state["human_feedback"] = feedback
+                state["is_approved"] = False
+                print("\n-> Re-routing to Architect Agent with custom feedback...")
+                state = orchestrator_graph.invoke(state, config=config)
+            else:
+                print("-> No feedback provided. Keeping current blueprint.")
+        elif choice == "Q":
+            print("\n-> Execution aborted by user. Exiting cleanly.")
+            sys.exit(0)
 
     print("\n=============================================")
     print("=== Graph Execution Finished: Final State ===")
     print("=============================================")
-    print(json.dumps(final_output_state, indent=4))
+
+
+if __name__ == "__main__":
+    main()

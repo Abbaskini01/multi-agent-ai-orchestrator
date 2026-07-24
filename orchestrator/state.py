@@ -1,18 +1,21 @@
-from typing import TypedDict
+from typing import TypedDict, List, Dict, Any
 
 
 class ProjectTask(TypedDict):
-    filename: str          # Name of target file (e.g., 'database.py')
-    task_description: str  # Low-level coding instructions
-    generated_code: str    # Raw Python code for this file
+    filename: str          # e.g., "src/database.py", "tests/test_database.py", "requirements.txt"
+    task_description: str  # Architectural role, inputs, outputs, public interfaces
+    generated_code: str    # Filled by Executor Node
 
 
 class OrchestratorState(TypedDict):
-    user_requirement: str          # Original prompt passed into orchestrator
-    acceptance_criteria: list[str] # Functional goals from Planner
-    tasks: list[ProjectTask]        # Multi-file task array
-    current_task_index: int        # Sequential execution pointer
-    error_message: str             # Error traceback log
-    retry_count: int               # Circuit breaker iteration counter
-    human_feedback: str            # Phase 7: User feedback for re-planning
-    is_approved: bool              # Phase 7: HITL approval flag
+    user_requirement: str
+    project_name: str          # e.g., "ExpenseTracker"
+    architecture_pattern: str  # e.g., "Layered Clean Architecture (Modular CLI)"
+    folders: List[str]         # e.g., ["src", "tests", "docs", "scripts", ".github/workflows"]
+    acceptance_criteria: List[str]
+    tasks: List[ProjectTask]
+    current_task_index: int
+    error_message: str
+    retry_count: int
+    human_feedback: str
+    is_approved: bool
