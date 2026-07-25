@@ -3,6 +3,8 @@ from orchestrator.state import OrchestratorState
 from orchestrator.planner import planner_node
 from orchestrator.scaffolder import scaffolder_node
 from orchestrator.executor import executor_node
+from orchestrator.exporter import exporter_node
+from orchestrator.notifier import notifier_node
 from orchestrator.validators import (
     syntax_tester_node,
     runtime_tester_node,
@@ -30,11 +32,12 @@ def route_after_runtime(state: OrchestratorState) -> str:
 
 
 def route_after_functional(state: OrchestratorState) -> str:
+    """If tests fail and retries remain, loop to Executor. If tests pass, route to Exporter."""
     error = state.get("error_message", "")
     retries = state.get("retry_count", 0)
     if error and retries < 3:
         return "executor"
-    return END
+    return "exporter"
 
 
 # Define the LangGraph State Machine
@@ -47,6 +50,8 @@ workflow.add_node("executor", executor_node)
 workflow.add_node("syntax_tester", syntax_tester_node)
 workflow.add_node("runtime_tester", runtime_tester_node)
 workflow.add_node("functional_tester", functional_tester_node)
+workflow.add_node("exporter", exporter_node)
+workflow.add_node("notifier", notifier_node)
 
 # Flow Connections
 workflow.set_entry_point("planner")
@@ -75,8 +80,11 @@ workflow.add_conditional_edges(
 workflow.add_conditional_edges(
     "functional_tester",
     route_after_functional,
-    {"executor": "executor", END: END}
+    {"executor": "executor", "exporter": "exporter"}
 )
+
+workflow.add_edge("exporter", "notifier")
+workflow.add_edge("notifier", END)
 
 # Export Compiled Graph App
 app = workflow.compile()
