@@ -4,10 +4,11 @@ Neural Glass AI Orchestrator — Server Composition Root
 
 import sys
 import asyncio
+from typing import Optional
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,8 +18,15 @@ from core.logger import log_event
 from core.metrics import metrics
 from core.health import health_router, livez_probe, readyz_probe, healthz_probe
 from core.tracing import set_request_id, reset_request_id
+from core.git import get_git_status, get_unified_diff, get_commit_history, rollback_to_commit
+from orchestrator.indexer import index_workspace
+from orchestrator.dep_graph import get_dependency_graph
+from orchestrator.state import OrchestratorState
 from websocket.manager import manager
 from orchestrator.pipeline import safe_run_pipeline
+
+# Global state reference for runtime state inspection
+latest_orchestrator_state: Optional[OrchestratorState] = None
 
 
 @asynccontextmanager
@@ -91,6 +99,73 @@ async def serve_index():
         "message": "Neural Glass AI Orchestrator API is running. Mount static/index.html to render UI at root."
     })
 
+
+# --- Phase V5.1: Git Intelligence API Endpoints ---
+
+@app.get("/api/git/status")
+async def api_git_status():
+    """Returns modified, untracked, and staged files in the workspace sandbox."""
+    return get_git_status()
+
+
+@app.get("/api/git/diff")
+async def api_git_diff():
+    """Generates and returns the current unified diff for the workspace."""
+    return {"diff": get_unified_diff()}
+
+
+@app.get("/api/git/commits")
+async def api_git_commits():
+    """Returns the recent git commit history for the workspace sandbox."""
+    return {"commits": get_commit_history()}
+
+
+@app.post("/api/git/rollback")
+async def api_git_rollback(payload: dict):
+    """Hard resets the workspace sandbox to a target commit hash."""
+    target_hash = payload.get("hash")
+    if not target_hash:
+        raise HTTPException(status_code=400, detail="Commit hash required for rollback")
+    success = rollback_to_commit(target_hash)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Failed to rollback to commit {target_hash}")
+    return {"status": "success", "hash": target_hash}
+
+
+# --- Phase V5.2: Codebase Intelligence API Endpoints ---
+
+@app.get("/api/codebase/symbols")
+async def api_codebase_symbols():
+    """Returns all extracted classes, functions, and symbols across the workspace."""
+    return index_workspace()
+
+
+@app.get("/api/codebase/graph")
+async def api_codebase_graph():
+    """Returns the module dependency graph nodes and edges for the workspace."""
+    return get_dependency_graph()
+
+
+# --- Phase V5.3: Specialized Agent Multi-Mesh State Endpoint ---
+
+@app.get("/api/agents/state")
+async def api_agents_state():
+    """Returns the latest multi-agent execution state snapshot."""
+    if latest_orchestrator_state:
+        return {
+            "requirement": latest_orchestrator_state.get("user_requirement", ""),
+            "clean_requirement": latest_orchestrator_state.get("clean_requirement", ""),
+            "parsed_intent": latest_orchestrator_state.get("parsed_intent", ""),
+            "plan_steps": latest_orchestrator_state.get("plan_steps", []),
+            "security_findings": latest_orchestrator_state.get("security_findings", []),
+            "code_review_notes": latest_orchestrator_state.get("code_review_notes", []),
+            "has_readme": bool(latest_orchestrator_state.get("documentation_markdown", "")),
+            "files_count": len(latest_orchestrator_state.get("generated_files", {}))
+        }
+    return {"status": "idle", "message": "No pipeline runs executed yet."}
+
+
+# --- WebSocket Orchestration Route ---
 
 @app.websocket("/ws/orchestrate")
 async def websocket_orchestrate(websocket: WebSocket):
