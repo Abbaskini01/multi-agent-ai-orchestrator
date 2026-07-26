@@ -1,19 +1,24 @@
+# Define utility functions
 import sqlite3
 
-def create_table(cursor):
-    cursor.execute('''CREATE TABLE IF NOT EXISTS expenses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date DATE,
-        category TEXT,
-        amount REAL,
-        description TEXT
-    )''')
+# Function to get all categories
+def get_all_categories(conn):
+    sql = '''SELECT DISTINCT category FROM expenses'''
+    try:
+        c = conn.cursor()
+        c.execute(sql)
+        rows = c.fetchall()
+        return [row[0] for row in rows]
+    except sqlite3.Error as e:
+        print(e)
 
-def insert_expense(cursor, date, category, amount, description):
-    cursor.execute('INSERT INTO expenses (date, category, amount, description) VALUES (?, ?, ?, ?)', (date, category, amount, description))
-
-def view_expenses(cursor):
-    cursor.execute('SELECT * FROM expenses')
-    rows = cursor.fetchall()
-    for row in rows:
-        print(f'Date: {row[1]}, Category: {row[2]}, Amount: {row[3]}, Description: {row[4]}')
+# Function to get total expenses by category
+def get_total_expenses_by_category(conn, category):
+    sql = '''SELECT SUM(amount) FROM expenses WHERE category = ?'''
+    try:
+        c = conn.cursor()
+        c.execute(sql, (category,))
+        row = c.fetchone()
+        return row[0]
+    except sqlite3.Error as e:
+        print(e)
