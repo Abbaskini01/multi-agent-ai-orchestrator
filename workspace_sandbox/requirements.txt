@@ -1,6 +1,12 @@
+import pytest
+import sqlite3
 
-fastapi
-uvicorn
-pydantic
-redis
-   
+def test_sqlite_connection():
+    conn = sqlite3.connect(':memory:')
+    cursor = conn.cursor()
+    cursor.execute('CREATE TABLE test (id INTEGER PRIMARY KEY)')
+    cursor.execute('INSERT INTO test (id) VALUES (1)')
+    cursor.execute('SELECT * FROM test')
+    result = cursor.fetchone()
+    assert result == (1,)
+    conn.close()
