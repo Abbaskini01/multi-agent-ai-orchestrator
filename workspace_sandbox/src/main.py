@@ -1,64 +1,33 @@
-# Importing Libraries
-import sqlite3
-from sqlite3 import Error
-import os
-import sys
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional
+import uuid
+import redis
 
-# Create a new database if the database doesn't already exist
-def create_database():
-    try:
-        conn = sqlite3.connect('expenses.db')
-        print(sqlite3.version)
-        return conn
-    except Error as e:
-        print(e)
+app = FastAPI()
 
-# Create table
-def create_table(conn):
-    sql = '''CREATE TABLE IF NOT EXISTS expenses (
-                id integer PRIMARY KEY,
-                date text NOT NULL,
-                category text NOT NULL,
-                amount real NOT NULL
-            );'''
-    try:
-        c = conn.cursor()
-        c.execute(sql)
-    except Error as e:
-        print(e)
+# Redis connection settings
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
 
-# Insert a new row into the expenses table
-def insert_expense(conn, expense):
-    sql = '''INSERT INTO expenses(date, category, amount)
-             VALUES(?,?,?)'''
-    try:
-        c = conn.cursor()
-        c.execute(sql, expense)
-        conn.commit()
-        return c.lastrowid
-    except Error as e:
-        print(e)
+class URL(BaseModel):
+    original_url: str
+    url_id: Optional[str] = None
 
-# Select all rows from the expenses table
-def select_all(conn):
-    sql = '''SELECT * FROM expenses'''
-    try:
-        c = conn.cursor()
-        c.execute(sql)
-        rows = c.fetchall()
-        for row in rows:
-            print(row)
-    except Error as e:
-        print(e)
+# POST /url - create a new shortened URL
+@app.post("/url")
+async def create_url(url: URL):
+    if not url.url_id:
+        url_id = str(uuid.uuid4())[:6]
+    else:
+        url_id = url.url_id
+    redis_client.set(url_id, url.original_url)
+    return {"url_id": url_id, "shortened_url": f"http://localhost:8000/{url_id}"}
 
-# Main Function with example usage
-if __name__ == '__main__':
-    database = create_database()
-    create_table(database)
-    with database:
-        print("Selecting all expenses")
-        select_all(database)
-        new_expense = ('2024-01-01', 'Rent', 1000.0)
-        insert_expense(database, new_expense)
-        print("Selecting all expenses after insert")
-        select_all(database)
+# GET /{url_id} - redirect to the original URL
+@app.get("/{url_id}")
+async def redirect_to_original_url(url_id: str):
+    original_url = redis_client.get(url_id)
+    if not original_url:
+        raise HTTPException(status_code=404, detail="URL not found")
+    return JSONResponse(content={"original_url": original_url.decode("utf-8")}, status_code=302, headers={"Location": original_url.decode("utf-8")})

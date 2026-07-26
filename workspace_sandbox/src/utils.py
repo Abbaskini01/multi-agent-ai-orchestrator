@@ -1,24 +1,15 @@
-# Define utility functions
-import sqlite3
+from typing import Optional
+import uuid
+import redis
 
-# Function to get all categories
-def get_all_categories(conn):
-    sql = '''SELECT DISTINCT category FROM expenses'''
-    try:
-        c = conn.cursor()
-        c.execute(sql)
-        rows = c.fetchall()
-        return [row[0] for row in rows]
-    except sqlite3.Error as e:
-        print(e)
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
 
-# Function to get total expenses by category
-def get_total_expenses_by_category(conn, category):
-    sql = '''SELECT SUM(amount) FROM expenses WHERE category = ?'''
-    try:
-        c = conn.cursor()
-        c.execute(sql, (category,))
-        row = c.fetchone()
-        return row[0]
-    except sqlite3.Error as e:
-        print(e)
+async def generate_url_id() -> str:
+    return str(uuid.uuid4())[:6]
+
+async def store_url(url_id: str, original_url: str) -> None:
+    redis_client.set(url_id, original_url)
+
+async def get_original_url(url_id: str) -> Optional[str]:
+    original_url = redis_client.get(url_id)
+    return original_url.decode('utf-8') if original_url else None
