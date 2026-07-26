@@ -1,10 +1,6 @@
-# Expense Tracker
-A simple command line expense tracker using SQLite.
-
+# CLI Expense Tracker
+A simple CLI expense tracker that stores expenses in a SQLite database.
 ## Usage
-Run `python src/main.py` to start the expense tracker.
-
-## Features
-* Get all expenses
-* Add new expense
-* Delete expense
+1. Run `python src/main.py` to start the CLI.
+2. Choose an option from the menu.
+3. Follow the prompts to insert or view expenses.

@@ -1,17 +1,19 @@
 import sqlite3
 
-conn = sqlite3.connect('expenses.db')
-cursor = conn.cursor()
+def create_table(cursor):
+    cursor.execute('''CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date DATE,
+        category TEXT,
+        amount REAL,
+        description TEXT
+    )''')
 
-cursor.execute('CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, amount REAL)')
-conn.commit()
+def insert_expense(cursor, date, category, amount, description):
+    cursor.execute('INSERT INTO expenses (date, category, amount, description) VALUES (?, ?, ?, ?)', (date, category, amount, description))
 
-def get_expenses(cursor):
+def view_expenses(cursor):
     cursor.execute('SELECT * FROM expenses')
-    return cursor.fetchall()
-
-def add_expense(cursor, name, amount):
-    cursor.execute('INSERT INTO expenses (name, amount) VALUES (?, ?)', (name, amount))
-
-def delete_expense(cursor, id):
-    cursor.execute('DELETE FROM expenses WHERE id = ?', (id,))
+    rows = cursor.fetchall()
+    for row in rows:
+        print(f'Date: {row[1]}, Category: {row[2]}, Amount: {row[3]}, Description: {row[4]}')
