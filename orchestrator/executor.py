@@ -1,13 +1,39 @@
 import json
+import tempfile
+from pathlib import Path
 from orchestrator.config import invoke_llm_with_fallback
 from orchestrator.state import OrchestratorState, ProjectTask
 from orchestrator.utils import clean_extracted_code, compute_git_diff
-from orchestrator.ast_parser import build_codebase_symbol_map
+from orchestrator.context_engine import CodebaseContextEngine
+
+
+def _build_temporary_v3_context(tasks: list, query: str) -> str:
+    """
+    Helper function: Writes generated tasks to a temporary workspace,
+    indexes them via Tree-sitter + Qdrant, and retrieves surgical AST context.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Write current generated files into temp dir for Tree-sitter indexing
+            for t in tasks:
+                if t.get("generated_code"):
+                    file_path = Path(temp_dir) / t["filename"]
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(t["generated_code"], encoding="utf-8")
+            
+            # Run V3 CodebaseContextEngine on the temporary codebase
+            engine = CodebaseContextEngine(temp_dir)
+            summary = engine.index_codebase()
+            if summary["indexed_chunks"] > 0:
+                return engine.get_context_for_task(task_description=query, top_k=2)
+    except Exception as e:
+        print(f"-> V3 Context Engine Warning: {e}")
+    return ""
 
 
 def executor_node(state: OrchestratorState) -> dict:
-    """Specialized Executor Agent: Generates initial task files OR performs targeted surgical repairs."""
-    print("\n[Node Activating] ---> Executor Node")
+    """Specialized Executor Agent (V3 Enhanced): Uses Tree-sitter AST & Hybrid Search for Context."""
+    print("\n[Node Activating] ---> Executor Node (V3 Codebase Context Enabled)")
     
     error_message = state.get("error_message", "")
     retry_count = state.get("retry_count", 0)
@@ -15,16 +41,13 @@ def executor_node(state: OrchestratorState) -> dict:
     idx = state.get("current_task_index", 0)
 
     # -----------------------------------------------------------------
-    # Branch A: Multi-File Targeted Self-Correction Mode
+    # Branch A: Multi-File Targeted Self-Correction Mode (V3 Hybrid RAG)
     # -----------------------------------------------------------------
     if error_message:
-        print(f"-> Self-Correction Triggered (Attempt #{retry_count}). Analyzing for targeted repair...")
+        print(f"-> Self-Correction Triggered (Attempt #{retry_count}). Running V3 Hybrid Context Engine...")
         
-        ast_symbol_map = build_codebase_symbol_map(tasks)
-        print("\n[AST Codebase Symbol Index Generated]")
-        print("--------------------------------------------------")
-        print(ast_symbol_map.strip())
-        print("--------------------------------------------------")
+        # Retrieve AST Symbol Table & Hybrid RAG Context for the Error Trace
+        v3_context = _build_temporary_v3_context(tasks, f"Fix error: {error_message}")
 
         codebase_context = ""
         for t in tasks:
@@ -32,7 +55,7 @@ def executor_node(state: OrchestratorState) -> dict:
 
         fix_system_prompt = (
             "You are an expert Python engineer debugging a multi-file project workspace.\n"
-            "Analyze the error trace log, the AST Codebase Symbol Index, and the multi-file source code.\n\n"
+            "Analyze the error trace log, the V3 AST Codebase Context, and the multi-file source code.\n\n"
             "CRITICAL JSON FORMATTING RULES:\n"
             "1. You MUST respond with a single, valid JSON object containing a key called 'files'.\n"
             "2. 'files' must be an array of objects, each having 'filename' and 'code' keys.\n"
@@ -49,14 +72,21 @@ def executor_node(state: OrchestratorState) -> dict:
 
         user_prompt = (
             f"Requirement: '{state['user_requirement']}'\n\n"
-            f"AST Codebase Symbol Map:\n"
-            f"--------------------------------------------------\n"
-            f"{ast_symbol_map}\n"
-            f"--------------------------------------------------\n\n"
             f"Validation Failure Error Trace:\n"
             f"--------------------------------------------------\n"
             f"{error_message}\n"
             f"--------------------------------------------------\n\n"
+        )
+
+        if v3_context:
+            user_prompt += (
+                f"V3 AST & HYBRID RAG CODEBASE CONTEXT:\n"
+                f"--------------------------------------------------\n"
+                f"{v3_context}\n"
+                f"--------------------------------------------------\n\n"
+            )
+
+        user_prompt += (
             f"Current Multi-File Codebase:\n"
             f"{codebase_context}\n\n"
             f"Identify the root cause, fix ONLY the affected file(s), and return valid JSON."
@@ -107,7 +137,7 @@ def executor_node(state: OrchestratorState) -> dict:
             return {}
 
     # -----------------------------------------------------------------
-    # Branch B: Standard Sequential File Generation
+    # Branch B: Standard Sequential File Generation (V3 Context-Aware)
     # -----------------------------------------------------------------
     if not tasks or idx >= len(tasks):
         return {}
@@ -116,12 +146,29 @@ def executor_node(state: OrchestratorState) -> dict:
     filename = active_task["filename"]
     task_desc = active_task["task_description"]
 
+    # V3 Upgrade: Index previously generated components to ensure cross-file symbol alignment
+    v3_prev_context = ""
+    already_generated = [t for t in tasks[:idx] if t.get("generated_code")]
+    if already_generated:
+        v3_prev_context = _build_temporary_v3_context(already_generated, f"Implement {filename}: {task_desc}")
+
     print(f"-> Generating component [{idx + 1}/{len(tasks)}]: {filename}...")
     programmer_prompt = (
         f"You are an expert Python engineer working on a multi-file project workspace.\n"
         f"Implement component '{filename}' based on this plan:\n"
         f"{task_desc}\n\n"
         f"Requirement: '{state['user_requirement']}'\n\n"
+    )
+
+    if v3_prev_context:
+        programmer_prompt += (
+            f"V3 CONTEXT FROM PREVIOUSLY GENERATED MODULES:\n"
+            f"--------------------------------------------------\n"
+            f"{v3_prev_context}\n"
+            f"--------------------------------------------------\n\n"
+        )
+
+    programmer_prompt += (
         f"CRITICAL CODING RULES:\n"
         f"1. For interactive loops, ALWAYS use simple numeric menu choices (1, 2, 3, 4...) and wrap `input()` in `try ... except (EOFError, KeyboardInterrupt): break` so automated runners exit cleanly.\n"
         f"2. If writing `parse_args`, ALWAYS define it as `def parse_args(args=None): ... return parser.parse_args(args)`.\n"
