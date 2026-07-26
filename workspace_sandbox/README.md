@@ -1,14 +1,10 @@
-# Markdown File Parser CLI
-
-A simple command-line interface for parsing markdown files.
+# Expense Tracker
+A simple command line expense tracker using SQLite.
 
 ## Usage
-
-```
-python src/main.py path/to/markdown/file.md
-```
+Run `python src/main.py` to start the expense tracker.
 
 ## Features
-
-- Parse markdown text
-- Extract headers
+* Get all expenses
+* Add new expense
+* Delete expense

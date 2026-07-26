@@ -1,15 +1,26 @@
-import argparse
-import os
-from markdown import Markdown
+import sqlite3
+from src.utils import get_expenses, add_expense, delete_expense
 
-def parse_markdown(file_path):
-    with open(file_path, 'r') as file:
-        markdown_text = file.read()
-    md = Markdown()
-    return md.convert(markdown_text)
+conn = sqlite3.connect('expenses.db')
+cursor = conn.cursor()
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Markdown File Parser CLI')
-    parser.add_argument('file_path', type=str, help='Path to markdown file')
-    args = parser.parse_args()
-    print(parse_markdown(args.file_path))
+while True:
+    print("1. Get expenses\n2. Add expense\n3. Delete expense\n4. Quit")
+    choice = input('> ')
+    if choice == '1':
+        expenses = get_expenses(cursor)
+        for expense in expenses:
+            print(expense)
+    elif choice == '2':
+        name = input('Enter expense name: ')
+        amount = float(input('Enter expense amount: '))
+        add_expense(cursor, name, amount)
+        conn.commit()
+    elif choice == '3':
+        id = int(input('Enter expense id: '))
+        delete_expense(cursor, id)
+        conn.commit()
+    elif choice == '4':
+        break
+    else:
+        print('Invalid choice')
