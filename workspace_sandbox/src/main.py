@@ -1,23 +1,25 @@
+# -*- coding: utf-8 -*-
 import sqlite3
-from datetime import datetime
 
-
-def create_connection(db_file):
+def create_connection():
     conn = None
     try:
-        conn = sqlite3.connect(db_file)
-        return conn
+        conn = sqlite3.connect('expenses.db')
+        print(sqlite3.version)
     except sqlite3.Error as e:
         print(e)
+
+    return conn
 
 
 def create_table(conn, table_name):
     sql = f'''CREATE TABLE IF NOT EXISTS {table_name} (
-                id integer PRIMARY KEY,
-                date text NOT NULL,
-                category text NOT NULL,
-                amount real NOT NULL
-            ); '''
+                id INTEGER PRIMARY KEY,
+                date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL
+    );'''
     try:
         c = conn.cursor()
         c.execute(sql)
@@ -25,57 +27,63 @@ def create_table(conn, table_name):
         print(e)
 
 
-def add_expense(conn, expense):
-    sql = '''INSERT INTO expenses(date, category, amount)
-              VALUES(?,?,?) '''
+def insert_data(conn, data):
+    sql = ''' INSERT INTO expenses (date, category, description, amount)
+              VALUES(?,?,?,?) '''
     try:
         c = conn.cursor()
-        c.execute(sql, expense)
+        c.execute(sql, data)
         conn.commit()
-        return c.lastrowid
+        return True
     except sqlite3.Error as e:
         print(e)
+        return False
 
 
-def get_all_expenses(conn, table_name):
-    sql = f'''SELECT * FROM {table_name}'''
+def list_all_expenses(conn):
+    sql = ''' SELECT * FROM expenses '''
     try:
         c = conn.cursor()
         c.execute(sql)
-        rows = c.fetchall()
-        return rows
+        return c.fetchall()
     except sqlite3.Error as e:
         print(e)
-
-
-def main():
-    database = 'expenses.db'
-    table_name = 'expenses'
-    conn = create_connection(database)
-    if conn is not None:
-        create_table(conn, table_name)
-        while True:
-            print('1. Add Expense\n2. View Expenses\n3. Quit')
-            choice = input("Choose an option: ")
-            if choice == '1':
-                date = datetime.now().strftime('%Y-%m-%d')
-                category = input('Enter category: ')
-                amount = float(input('Enter amount: '))
-                expense = (date, category, amount)
-                add_expense(conn, expense)
-                print('Expense added successfully.')
-            elif choice == '2':
-                rows = get_all_expenses(conn, table_name)
-                for row in rows:
-                    print(row)
-            elif choice == '3':
-                break
-            else:
-                print('Invalid choice')
-        conn.close()
-    else:
-        print("Error! Cannot create the database connection.")
 
 
 if __name__ == '__main__':
-    main()
+    print("Expense Tracker CLI Application")
+    connection = create_connection()
+    if connection is not None:
+        with connection:
+            print("Connected to SQLite Database")
+            create_table(connection, 'expenses')
+            while True:
+                print("Available Commands:")
+                print("1. Add expense")
+                print("2. List all expenses")
+                print("3. Quit")
+                choice = input("Enter your choice: ")
+                if choice == '1':
+                    date = input("Enter expense date (YYYY-MM-DD): ")
+                    category = input("Enter expense category: ")
+                    description = input("Enter expense description: ")
+                    amount = float(input("Enter expense amount: $ "))
+                    data = (date, category, description, amount)
+                    if insert_data(connection, data):
+                        print("Expense successfully added.")
+                    else:
+                        print("Failed to add expense.")
+                elif choice == '2':
+                    results = list_all_expenses(connection)
+                    if results:
+                        print("Expenses:")
+                        for row in results:
+                            print(f"ID: {row[0]}\nDate: {row[1]}\nCategory: {row[2]}\nDescription: {row[3]}\nAmount: {row[4]}")
+                    else:
+                        print("No expenses recorded.")
+                elif choice == '3':
+                    break
+                else:
+                    print("Invalid choice. Please choose a valid option.")
+    else:
+        print("Error! Cannot create the database connection.")

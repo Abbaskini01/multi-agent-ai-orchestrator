@@ -4,7 +4,7 @@
 Build CLI Expense Tracker with SQLite
 
 ## Architecture Intent
-Design a command-line interface (CLI) based expense tracking system that utilizes a SQLite database to store and manage user expenses, providing a simple and intuitive way to record, categorize, and analyze financial transactions.
+The architectural intent is to design a command-line interface (CLI) expense tracking application that utilizes SQLite as the backend database to store and manage user expenses securely and efficiently.
 
 ## Generated Modules
 - `src/main.py`
