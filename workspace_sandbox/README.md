@@ -1,13 +1,15 @@
 # Workspace Documentation
 
 ## Requirement
-Build Markdown File Parser CLI
+Build URL Shortener REST API with FastAPI
 
 ## Architecture Intent
-The architectural intent is to design a Command-Line Interface (CLI) application that can efficiently parse and process Markdown files, providing a scalable and maintainable framework for handling various Markdown syntax elements.
+The architectural intent is to design a scalable and secure URL shortener REST API using FastAPI, providing endpoints for shortening and redirecting URLs while ensuring high performance and data integrity.
 
 ## Generated Modules
-- `src/main.py`
-- `src/utils.py`
-- `requirements.txt`
+- `main.py`
+- ` requirements.txt`
 - `README.md`
+- `database.db`
+- `py.typed`
+- `schema.sql`
