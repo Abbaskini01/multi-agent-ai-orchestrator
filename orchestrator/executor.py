@@ -1,6 +1,13 @@
+"""
+Neural Glass AI Orchestrator — Specialized Executor Agent Node (V3 Enhanced)
+Implements Tree-sitter AST, Hybrid RAG Context Retrieval, Self-Correction, and Diff Logging.
+"""
+
 import json
 import tempfile
 from pathlib import Path
+
+from core.logger import log_event
 from orchestrator.config import invoke_llm_with_fallback
 from orchestrator.state import OrchestratorState, ProjectTask
 from orchestrator.utils import clean_extracted_code, compute_git_diff
@@ -24,16 +31,16 @@ def _build_temporary_v3_context(tasks: list, query: str) -> str:
             # Run V3 CodebaseContextEngine on the temporary codebase
             engine = CodebaseContextEngine(temp_dir)
             summary = engine.index_codebase()
-            if summary["indexed_chunks"] > 0:
+            if summary.get("indexed_chunks", 0) > 0:
                 return engine.get_context_for_task(task_description=query, top_k=2)
     except Exception as e:
-        print(f"-> V3 Context Engine Warning: {e}")
+        log_event("v3_context_engine_warning", level="warning", error=str(e))
     return ""
 
 
 def executor_node(state: OrchestratorState) -> dict:
     """Specialized Executor Agent (V3 Enhanced): Uses Tree-sitter AST & Hybrid Search for Context."""
-    print("\n[Node Activating] ---> Executor Node (V3 Codebase Context Enabled)")
+    log_event("executor_node_activating", phase="Executor Node V3 Hybrid Context")
     
     error_message = state.get("error_message", "")
     retry_count = state.get("retry_count", 0)
@@ -44,7 +51,7 @@ def executor_node(state: OrchestratorState) -> dict:
     # Branch A: Multi-File Targeted Self-Correction Mode (V3 Hybrid RAG)
     # -----------------------------------------------------------------
     if error_message:
-        print(f"-> Self-Correction Triggered (Attempt #{retry_count}). Running V3 Hybrid Context Engine...")
+        log_event("self_correction_triggered", attempt=retry_count)
         
         # Retrieve AST Symbol Table & Hybrid RAG Context for the Error Trace
         v3_context = _build_temporary_v3_context(tasks, f"Fix error: {error_message}")
@@ -116,10 +123,7 @@ def executor_node(state: OrchestratorState) -> dict:
                             
                             diff_text = compute_git_diff(old_code, fcode, fname)
                             if diff_text:
-                                print(f"\n[Git Patch Generated for '{fname}']")
-                                print("--------------------------------------------------")
-                                print(diff_text.strip())
-                                print("--------------------------------------------------")
+                                log_event("git_patch_generated", filename=fname, diff=diff_text.strip())
 
                             updated_tasks[i] = ProjectTask(
                                 filename=fname,
@@ -129,11 +133,11 @@ def executor_node(state: OrchestratorState) -> dict:
                             repaired_filenames.append(fname)
             
             untouched_files = [t["filename"] for t in updated_tasks if t["filename"] not in repaired_filenames]
-            print(f"-> Targeted Repair Complete. Repaired: {repaired_filenames} | Preserved untouched: {untouched_files}")
+            log_event("targeted_repair_complete", repaired=repaired_filenames, untouched=untouched_files)
                         
             return {"tasks": updated_tasks}
         except Exception as e:
-            print(f"-> Self-Correction JSON Parse Error: {e}")
+            log_event("self_correction_json_parse_error", error=str(e), level="error")
             return {}
 
     # -----------------------------------------------------------------
@@ -152,7 +156,7 @@ def executor_node(state: OrchestratorState) -> dict:
     if already_generated:
         v3_prev_context = _build_temporary_v3_context(already_generated, f"Implement {filename}: {task_desc}")
 
-    print(f"-> Generating component [{idx + 1}/{len(tasks)}]: {filename}...")
+    log_event("generating_component", component_index=idx + 1, total_components=len(tasks), filename=filename)
     programmer_prompt = (
         f"You are an expert Python engineer working on a multi-file project workspace.\n"
         f"Implement component '{filename}' based on this plan:\n"

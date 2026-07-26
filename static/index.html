@@ -804,6 +804,9 @@
             if (activeEl) activeEl.className = "flex items-center gap-2 px-3 py-1.5 rounded-lg border border-cyan-500 text-cyan-400 bg-cyan-950/40 glow-cyan transition-all font-semibold";
         }
 
+        // ==========================================
+        // V4 BACKEND PAYLOAD MAPPING FIXES APPLIED HERE
+        // ==========================================
         function handleTelemetryEvent(payload) {
             const streamOut = document.getElementById('tab-content-stream');
 
@@ -848,16 +851,41 @@
                 safeSetText('active-phase', payload.data.phase.toUpperCase());
             }
 
-            if (payload.educational_concept && payload.educational_concept.title) {
-                updateEducationalHUD(payload.educational_concept);
+            // Fix 1: Map V4 Concept History Event
+            if (payload.event === "CONCEPT_LEARNED" && payload.data) {
+                const concept = {
+                    title: payload.data.title || payload.data.name || "Concept Learned",
+                    explanation: payload.data.description || payload.data.summary || "No details provided."
+                };
+                updateEducationalHUD(concept);
             }
 
-            if (payload.ast_data && payload.ast_data.root) {
-                renderASTTree(payload.ast_data.root);
+            // Fix 2: Map V4 AST Tree Event
+            if (payload.event === "AST_INDEXED" && payload.data) {
+                if (payload.data.ast_tree && typeof payload.data.ast_tree === 'string') {
+                    const container = document.getElementById('ast-tree-container');
+                    if (container) {
+                        // Directly render the pre-formatted string from the backend
+                        container.innerHTML = `<pre class="text-cyan-400 bg-slate-900/50 p-3 rounded-lg border border-slate-800 overflow-x-auto text-[10px] leading-relaxed shadow-inner">${escapeHtml(payload.data.ast_tree)}</pre>`;
+                    }
+                } else if (payload.data.root) {
+                    // Fallback to older object-based recursion if it ever returns
+                    renderASTTree(payload.data.root);
+                }
             }
 
-            if (payload.vector_data && payload.vector_data.points) {
-                renderVectorPlot(payload.vector_data.points);
+            // Fix 3: Map V4 Qdrant 2D Vectors Event & Math Scaling
+            if (payload.event === "VECTORS_EMBEDDED" && payload.data && payload.data.points) {
+                // Map backend normalized decimals (e.g. 0.72) to the 0-300 SVG scale expected by renderVectorPlot
+                const mappedPoints = payload.data.points.map(p => ({
+                    x: (p.x * 150) + 150, // Scales and centers around the middle (150)
+                    y: (p.y * 150) + 150,
+                    matched: p.type === "match",
+                    label: p.label,
+                    type: p.type,
+                    similarity: p.score || p.similarity
+                }));
+                renderVectorPlot(mappedPoints);
             }
 
             if (payload.event === "PIPELINE_COMPLETE" && payload.data.files) {

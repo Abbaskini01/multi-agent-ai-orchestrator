@@ -1,15 +1,15 @@
-import sys
-from parser import ContentParser
-from formatter import OutputFormatter
+import argparse
+import os
+from markdown import Markdown
 
-def main():
-    sample_text = '# Hello World\nThis is parsed content.'
-    parser = ContentParser()
-    parsed_data = parser.parse(sample_text)
-    formatter = OutputFormatter()
-    result = formatter.to_json(parsed_data)
-    print('[OK] Parse Output Result:')
-    print(result)
+def parse_markdown(file_path):
+    with open(file_path, 'r') as file:
+        markdown_text = file.read()
+    md = Markdown()
+    return md.convert(markdown_text)
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Markdown File Parser CLI')
+    parser.add_argument('file_path', type=str, help='Path to markdown file')
+    args = parser.parse_args()
+    print(parse_markdown(args.file_path))
