@@ -1,10 +1,11 @@
 """
-Neural Glass AI Orchestrator — Multi-Agent Workflow Runner with Full UI Telemetry & Specialized Mesh
+Neural Glass AI Orchestrator — Multi-Agent Workflow Runner with HITL Approval, Persistent Memory & Plugin Engine
 """
 
 import time
 import asyncio
 import traceback
+from typing import Dict, Any
 from fastapi import WebSocket
 
 from core.config import settings
@@ -12,6 +13,8 @@ from core.logger import log_event
 from core.metrics import metrics
 from core.tracing import get_request_id
 from core.git import init_sandbox_repo, get_unified_diff
+from core.memory import save_session_memory
+from core.plugins import plugin_registry
 from llm.groq import call_groq_intent
 from llm.gemini import call_gemini_generator
 from orchestrator.dlp import sanitize_prompt_dlp
@@ -21,13 +24,19 @@ from orchestrator.sandbox import write_generated_files_to_sandbox
 from orchestrator.git_agent import generate_ai_commit
 from orchestrator.indexer import index_workspace
 from orchestrator.dep_graph import get_dependency_graph
-from orchestrator.state import create_initial_orchestrator_state
+from orchestrator.state import OrchestratorState, create_initial_orchestrator_state
 from orchestrator.agents import (
     run_planner_agent,
     run_security_agent,
     run_doc_agent,
     run_reviewer_agent
 )
+from orchestrator.testers import (
+    run_flake8_lint,
+    run_mypy_check,
+    run_pytest_suite
+)
+from orchestrator.repair import classify_error_trace, run_repair_agent
 import server
 
 
@@ -51,6 +60,61 @@ async def emit_concept(websocket: WebSocket, title: str, description: str, categ
         f"Learned about {title}",
         finops_data
     )
+
+
+async def wait_for_human_approval(
+    websocket: WebSocket,
+    state: OrchestratorState,
+    step_name: str,
+    payload_preview: Dict[str, Any],
+    finops_data: dict,
+    timeout_seconds: int = 300
+) -> bool:
+    """
+    Pauses pipeline execution using an asyncio.Event barrier until user sends
+    an explicit approval or rejection signal.
+    """
+    state["requires_approval"] = True
+    state["approval_status"] = "PENDING"
+    
+    # Initialize global approval synchronization primitives
+    approval_event = asyncio.Event()
+    server.current_approval_event = approval_event
+    server.latest_orchestrator_state = state
+
+    await emit_pipeline_telemetry(
+        websocket,
+        "HUMAN_APPROVAL_REQUESTED",
+        {
+            "step": step_name,
+            "preview": payload_preview,
+            "timeout_seconds": timeout_seconds,
+            "approval_status": "PENDING"
+        },
+        f"Approval Required: {step_name}",
+        "Pipeline paused waiting for human review.",
+        finops_data
+    )
+    await emit_concept(
+        websocket,
+        "Human-in-the-Loop (HITL) Gatekeeping",
+        "Inserting explicit human checkpoints into autonomous pipelines to review and validate generated code before disk mutation.",
+        "System Governance",
+        finops_data
+    )
+
+    try:
+        await asyncio.wait_for(approval_event.wait(), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        state["approval_status"] = "REJECTED"
+        state["human_notes"] = "Timed out waiting for human approval."
+        log_event("hitl_approval_timeout", step=step_name, level="warning")
+        return False
+    finally:
+        server.current_approval_event = None
+        state["requires_approval"] = False
+
+    return state.get("approval_status") == "APPROVED"
 
 
 async def safe_run_pipeline(websocket: WebSocket, requirement: str):
@@ -78,7 +142,7 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     # Ensure Sandbox Git Repository is Initialized
     init_sandbox_repo()
 
-    # Initialize Phase V5.3 Orchestrator State
+    # Initialize Phase V6.6 Orchestrator State
     state = create_initial_orchestrator_state(requirement)
 
     # DLP Sanitization Step
@@ -114,8 +178,7 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         f"Groq parsed intent: '{parsed_intent}'",
         finops_data
     )
-    # 📚 EDUCATIONAL CONCEPT: Intent Parsing
-    await emit_concept(websocket, "Intent Parsing", "The process where an AI model analyzes raw human text (like a prompt) to understand the underlying goal, extracting actionable requirements before writing any code.", "Natural Language Processing", finops_data)
+    await emit_concept(websocket, "Intent Parsing", "The process where an AI model analyzes raw human text to understand the underlying goal.", "Natural Language Processing", finops_data)
     await asyncio.sleep(0.5)
 
     # 2. Planner Agent Node
@@ -131,7 +194,7 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     plan_steps = await run_planner_agent(state)
     finops_data = finops.calculate_step(100, 40, start_t, "Planner Agent")
 
-    await emit_concept(websocket, "Planner Agent", "Decomposing high-level software goals into explicit step-by-step task graphs before invoking code generators.", "Multi-Agent System", finops_data)
+    await emit_concept(websocket, "Planner Agent", "Decomposing high-level software goals into explicit step-by-step task graphs.", "Multi-Agent System", finops_data)
     await asyncio.sleep(0.5)
 
     # 3. Gemini / Groq Code Generation Node
@@ -146,6 +209,10 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     )
 
     generated_files = await call_gemini_generator(clean_requirement)
+    
+    # Phase V6.6 Extension Point: Trigger active Plugin post-generation hooks
+    generated_files = await plugin_registry.run_post_generation_hooks(generated_files, state)
+
     file_list = list(generated_files.keys())
     state["generated_files"] = generated_files
     finops_data = finops.calculate_step(520, 680, start_t, settings.default_gemini_model)
@@ -158,9 +225,30 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         f"Generated {len(file_list)} production files.",
         finops_data
     )
-    # 📚 EDUCATIONAL CONCEPT: Context-Injected Generation
-    await emit_concept(websocket, "Agentic Scaffolding", "Instead of writing one giant script, AI Architects design modular software by dynamically generating multiple interconnected files (like main.py, database.py, and requirements.txt) all at once.", "Software Architecture", finops_data)
+    await emit_concept(websocket, "Agentic Scaffolding", "Designing modular software by dynamically generating multiple interconnected files.", "Software Architecture", finops_data)
     await asyncio.sleep(0.5)
+
+    # --- Phase V6.3 HITL Gatekeeping Point: Pause before Code Persistence ---
+    start_t = time.time()
+    approved = await wait_for_human_approval(
+        websocket,
+        state,
+        "Code Generation Persistence",
+        {"files": file_list, "files_count": len(file_list)},
+        finops_data
+    )
+
+    if not approved:
+        finops_data = finops.calculate_step(0, 0, start_t, "HITL Gatekeeper")
+        await emit_pipeline_telemetry(
+            websocket,
+            "PIPELINE_HALTED",
+            {"reason": state.get("human_notes", "User rejected code persistence.")},
+            "Pipeline Stopped by User",
+            "Execution halted cleanly during Human-in-the-Loop review.",
+            finops_data
+        )
+        return
 
     # 4. Code Persistence Executor Node
     start_t = time.time()
@@ -175,7 +263,7 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     write_generated_files_to_sandbox(generated_files)
     await asyncio.sleep(0.5)
 
-    # 5. Specialized Agent Multi-Mesh Node (Security + Doc + Reviewer Concurrently)
+    # 5. Specialized Agent Multi-Mesh Node
     start_t = time.time()
     await emit_pipeline_telemetry(
         websocket,
@@ -192,7 +280,6 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         run_reviewer_agent(state)
     )
 
-    # Re-persist README.md added by Doc Agent
     write_generated_files_to_sandbox(state["generated_files"])
     server.latest_orchestrator_state = state
 
@@ -211,10 +298,112 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         f"Security scan ({len(state.get('security_findings', []))} findings) & README generation done concurrently.",
         finops_data
     )
-    await emit_concept(websocket, "Parallel Agent Mesh", "Executing specialized AI agents concurrently to perform code review, security audits, and documentation in parallel without blocking the main workflow.", "Distributed Multi-Agent", finops_data)
     await asyncio.sleep(0.5)
 
-    # 6. Phase V5.2: Codebase Intelligence Indexing Node
+    # 6. Phase V6.2 Verification Suite & Autonomous Self-Repair Loop
+    max_repairs = 3
+    repair_count = 0
+
+    while True:
+        start_t = time.time()
+        await emit_pipeline_telemetry(
+            websocket,
+            "NODE_ACTIVATED",
+            {"node_id": "verification_runner", "node_name": "Interactive Test & Verification Suite", "phase": "Sandbox Testing"},
+            "Sandbox Code Execution & Testing",
+            f"Executing verification suite (Pass attempt {repair_count + 1}).",
+            finops_data
+        )
+
+        lint_res, type_res, test_res = await asyncio.gather(
+            run_flake8_lint(state),
+            run_mypy_check(state),
+            run_pytest_suite(state)
+        )
+
+        all_passed = lint_res["passed"] and type_res["passed"] and test_res["passed"]
+        finops_data = finops.calculate_step(160, 40, start_t, "Verification Suite")
+
+        await emit_pipeline_telemetry(
+            websocket,
+            "VERIFICATION_SUITE_COMPLETED",
+            {
+                "lint_passed": lint_res["passed"],
+                "type_check_passed": type_res["passed"],
+                "tests_passed": test_res["passed"],
+                "test_output": test_res["output"][:500]
+            },
+            "Sandbox Execution & Verification Complete",
+            f"Lint: {'PASS' if lint_res['passed'] else 'FAIL'} | Types: {'PASS' if type_res['passed'] else 'FAIL'} | Pytest: {'PASS' if test_res['passed'] else 'FAIL'}",
+            finops_data
+        )
+
+        if all_passed:
+            state["is_repaired"] = True if repair_count > 0 else False
+            break
+
+        if repair_count >= max_repairs:
+            log_event("max_repairs_reached", attempts=repair_count, level="warning")
+            break
+
+        # Extract target failure details for reflection
+        target_file, error_cat, error_details = classify_error_trace(
+            lint_res.get("output", ""),
+            type_res.get("output", ""),
+            test_res.get("output", "")
+        )
+
+        if not target_file or target_file not in state["generated_files"]:
+            target_file = list(state["generated_files"].keys())[0] if state["generated_files"] else "src/main.py"
+            error_cat = "VERIFICATION_FAILURE"
+            error_details = (
+                type_res.get("output", "") if not type_res.get("passed")
+                else test_res.get("output", "") if not test_res.get("passed")
+                else lint_res.get("output", "")
+            )
+
+        repair_count += 1
+        state["repair_attempts"] = repair_count
+
+        start_t = time.time()
+        await emit_pipeline_telemetry(
+            websocket,
+            "SELF_REPAIR_TRIGGERED",
+            {
+                "attempt": repair_count,
+                "max_attempts": max_repairs,
+                "target_file": target_file,
+                "error_category": error_cat,
+                "error_details": error_details[:300]
+            },
+            f"Autonomous Self-Repair Attempt #{repair_count}",
+            f"Repairing {target_file} due to {error_cat}",
+            finops_data
+        )
+        await emit_concept(
+            websocket,
+            "Self-Correction & Reflection Loop",
+            "When tests or linters fail, the AI analyzes the stack trace, generates a surgical fix, and re-tests autonomously.",
+            "Autonomous Agents",
+            finops_data
+        )
+
+        # Generate fix, apply patch, and write back to disk
+        repaired_files = await run_repair_agent(state, target_file, error_cat, error_details)
+        state["generated_files"].update(repaired_files)
+        write_generated_files_to_sandbox(state["generated_files"])
+
+        state.setdefault("repair_history", []).append({
+            "attempt": repair_count,
+            "file": target_file,
+            "category": error_cat,
+            "details": error_details[:200]
+        })
+        server.latest_orchestrator_state = state
+        finops_data = finops.calculate_step(220, 110, start_t, "Self-Repair Agent")
+        await asyncio.sleep(0.5)
+
+    # 7. Codebase Intelligence Indexing Node
     start_t = time.time()
     symbol_index = index_workspace()
     dep_graph = get_dependency_graph()
@@ -233,21 +422,11 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         f"Indexed {symbol_index.get('total_files', 0)} files & built dependency map.",
         finops_data
     )
-    # 📚 EDUCATIONAL CONCEPT: Dependency Graphing
-    await emit_concept(websocket, "Dependency Graphing", "Mapping how modules import and call functions across files. This prevents cross-file breaking changes when editing large codebases.", "Software Intelligence", finops_data)
     await asyncio.sleep(0.5)
 
-    # 7. Tree-sitter Indexer Node (AST Tree View Telemetry)
+    # 8. AST Syntax Tree Telemetry
     start_t = time.time()
     finops_data = finops.calculate_step(120, 40, start_t, "Tree-sitter AST Parser")
-    await emit_pipeline_telemetry(
-        websocket,
-        "NODE_ACTIVATED",
-        {"node_id": "indexer", "node_name": "AST Indexer", "phase": "Indexing"},
-        "AST Code Indexing",
-        "Parsing generated code syntax tree for context retrieval.",
-        finops_data
-    )
 
     ast_tree_data = (
         "module [0, 0] - [45, 0]\n"
@@ -273,11 +452,9 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         "Generated Tree-sitter AST hierarchy.",
         finops_data
     )
-    # 📚 EDUCATIONAL CONCEPT: AST
-    await emit_concept(websocket, "Abstract Syntax Tree (AST)", "A structural map of source code. Instead of reading code as raw text, ASTs break it down into grammatical components (functions, variables) so AI agents can safely modify exact logic blocks.", "Compilers & AI", finops_data)
     await asyncio.sleep(0.5)
 
-    # 8. Qdrant Vector Embedding Space Telemetry (2D Vectors View)
+    # 9. Qdrant Vector Embedding Space
     start_t = time.time()
     finops_data = finops.calculate_step(90, 30, start_t, "Qdrant Vector Space")
     
@@ -301,11 +478,9 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         "Mapped AST chunks into 2D Qdrant dense vector space.",
         finops_data
     )
-    # 📚 EDUCATIONAL CONCEPT: Vector Embeddings
-    await emit_concept(websocket, "Vector Embeddings", "Converting code or text into lists of numbers (vectors) in a multidimensional space. AI uses this to find mathematically 'similar' concepts rather than relying on exact keyword matches.", "Machine Learning", finops_data)
     await asyncio.sleep(0.5)
 
-    # 9. Git Intelligence Snapshot & AI Commit Node
+    # 10. Git Snapshot & AI Commit Node
     start_t = time.time()
     diff_text = get_unified_diff()
     commit_msg = await generate_ai_commit(clean_requirement)
@@ -323,35 +498,27 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         f"Version control snapshot created: '{commit_msg}'",
         finops_data
     )
-    # 📚 EDUCATIONAL CONCEPT: Atomic Version Control
-    await emit_concept(websocket, "Atomic VCS Snapshots", "Automatically committing code state at every pipeline iteration. This provides an audit trail of AI changes and allows instant step-level rollbacks if a generated build breaks.", "DevOps & Safety", finops_data)
     await asyncio.sleep(0.5)
 
-    # 10. Sandbox Execution Verification Node
-    start_t = time.time()
-    finops_data = finops.calculate_step(50, 20, start_t, "Docker Sandbox")
-    await emit_pipeline_telemetry(
-        websocket,
-        "NODE_ACTIVATED",
-        {"node_id": "docker", "node_name": "Docker Sandbox", "phase": "Verification"},
-        "Sandbox Code Execution",
-        "Verifying repository structure inside sandbox.",
-        finops_data
-    )
-    # 📚 EDUCATIONAL CONCEPT: Docker Sandbox
-    await emit_concept(websocket, "Ephemeral Sandboxing", "Executing AI-generated code inside an isolated, disposable container (like Docker). This protects the host machine from malicious code and ensures dependencies are clean.", "DevSecOps", finops_data)
-    await asyncio.sleep(0.5)
-
-    # 11. Final Project Concept Summary
+    # 11. Final Summary & Pipeline Complete
     await emit_concept(websocket, clean_requirement, f"Architectural overview: {parsed_intent[:90]}...", "Project Blueprint", finops_data)
     await asyncio.sleep(0.3)
 
-    # 12. Pipeline Completion
+    # Save completed execution session into Persistent Memory Engine
+    save_session_memory(
+        prompt=clean_requirement,
+        intent=parsed_intent,
+        files=state["generated_files"]
+    )
+
+    # Trigger active Plugin pipeline complete hooks
+    await plugin_registry.run_pipeline_complete_hooks(state)
+
     await emit_pipeline_telemetry(
         websocket,
         "PIPELINE_COMPLETE",
         {"status": "SUCCESS", "generated_files_count": len(state["generated_files"]), "files": state["generated_files"]},
         "Live AI Workspace Ready",
-        f"Successfully generated {len(state['generated_files'])} files!",
+        f"Successfully generated, verified, and self-repaired ({state.get('repair_attempts', 0)} repairs) {len(state['generated_files'])} files!",
         finops_data
     )

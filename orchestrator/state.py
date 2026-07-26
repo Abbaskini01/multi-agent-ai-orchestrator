@@ -1,3 +1,7 @@
+"""
+Neural Glass AI Orchestrator — Unified State Management Definition
+"""
+
 from typing import TypedDict, List, Dict, Any
 
 
@@ -31,6 +35,22 @@ class OrchestratorState(TypedDict, total=False):
     git_commit_hash: str
     git_commit_msg: str
 
+    # --- Phase V6.1 Interactive Sandbox & Testing Extensions ---
+    execution_logs: List[Dict[str, Any]]
+    lint_results: Dict[str, Any]
+    type_check_results: Dict[str, Any]
+    test_results: Dict[str, Any]
+
+    # --- Phase V6.2 Reflection & Self-Repair Extensions ---
+    repair_attempts: int
+    is_repaired: bool
+    repair_history: List[Dict[str, Any]]
+
+    # --- Phase V6.3 Human-in-the-Loop (HITL) Extensions ---
+    requires_approval: bool
+    approval_status: str       # "PENDING", "APPROVED", "REJECTED"
+    human_notes: str
+
 
 def create_initial_orchestrator_state(requirement: str) -> OrchestratorState:
     """Helper factory to create a clean state dictionary for execution pipelines."""
@@ -53,5 +73,15 @@ def create_initial_orchestrator_state(requirement: str) -> OrchestratorState:
         security_findings=[],
         documentation_markdown="",
         git_commit_hash="",
-        git_commit_msg=""
+        git_commit_msg="",
+        execution_logs=[],
+        lint_results={"passed": True, "exit_code": 0, "output": "Not run"},
+        type_check_results={"passed": True, "exit_code": 0, "output": "Not run"},
+        test_results={"passed": True, "exit_code": 0, "output": "Not run"},
+        repair_attempts=0,
+        is_repaired=False,
+        repair_history=[],
+        requires_approval=False,
+        approval_status="APPROVED",
+        human_notes=""
     )

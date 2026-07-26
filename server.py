@@ -19,14 +19,18 @@ from core.metrics import metrics
 from core.health import health_router, livez_probe, readyz_probe, healthz_probe
 from core.tracing import set_request_id, reset_request_id
 from core.git import get_git_status, get_unified_diff, get_commit_history, rollback_to_commit
+from core.memory import get_memory_history, init_memory_db
+from core.plugins import plugin_registry
 from orchestrator.indexer import index_workspace
 from orchestrator.dep_graph import get_dependency_graph
 from orchestrator.state import OrchestratorState
+from orchestrator.runner import run_sandbox_command
 from websocket.manager import manager
 from orchestrator.pipeline import safe_run_pipeline
 
-# Global state reference for runtime state inspection
+# Global references for runtime state inspection and HITL synchronization
 latest_orchestrator_state: Optional[OrchestratorState] = None
+current_approval_event: Optional[asyncio.Event] = None
 
 
 @asynccontextmanager
@@ -35,6 +39,13 @@ async def lifespan(app: FastAPI):
     try:
         log_event("app_startup_begin", version=settings.app_version, environment=settings.app_env)
         settings.validate_startup_credentials()
+        
+        # Initialize Persistent Memory Engine SQLite Database
+        init_memory_db()
+
+        # Phase V6.6: Discover and load dynamic extensions
+        plugin_registry.discover_and_load()
+
         log_event("startup_validation_passed")
     except Exception as e:
         log_event("startup_validation_failed", error=str(e), level="critical")
@@ -160,9 +171,105 @@ async def api_agents_state():
             "security_findings": latest_orchestrator_state.get("security_findings", []),
             "code_review_notes": latest_orchestrator_state.get("code_review_notes", []),
             "has_readme": bool(latest_orchestrator_state.get("documentation_markdown", "")),
-            "files_count": len(latest_orchestrator_state.get("generated_files", {}))
+            "files_count": len(latest_orchestrator_state.get("generated_files", {})),
+            "lint_results": latest_orchestrator_state.get("lint_results", {}),
+            "type_check_results": latest_orchestrator_state.get("type_check_results", {}),
+            "test_results": latest_orchestrator_state.get("test_results", {})
         }
     return {"status": "idle", "message": "No pipeline runs executed yet."}
+
+
+# --- Phase V6.1: Interactive Sandbox Execution Endpoints ---
+
+@app.post("/api/execution/run")
+async def api_execution_run(payload: dict):
+    """Executes an arbitrary shell command safely inside the workspace_sandbox directory."""
+    command = payload.get("command")
+    if not command:
+        raise HTTPException(status_code=400, detail="Command field is required")
+    timeout = payload.get("timeout", 15)
+    
+    code, stdout, stderr = await run_sandbox_command(command, timeout_seconds=timeout)
+    return {
+        "command": command,
+        "exit_code": code,
+        "stdout": stdout,
+        "stderr": stderr
+    }
+
+
+@app.get("/api/execution/test-report")
+async def api_execution_test_report():
+    """Returns the latest automated verification, linting, and unit testing report."""
+    if latest_orchestrator_state:
+        return {
+            "lint": latest_orchestrator_state.get("lint_results", {}),
+            "type_check": latest_orchestrator_state.get("type_check_results", {}),
+            "pytest": latest_orchestrator_state.get("test_results", {})
+        }
+    return {"status": "idle", "message": "No test reports available yet."}
+
+
+# --- Phase V6.2: Reflection & Self-Repair Endpoint ---
+
+@app.get("/api/execution/reflection")
+async def api_execution_reflection():
+    """Returns the reflection audit log and multi-round self-repair history."""
+    if latest_orchestrator_state:
+        return {
+            "repair_attempts": latest_orchestrator_state.get("repair_attempts", 0),
+            "is_repaired": latest_orchestrator_state.get("is_repaired", False),
+            "repair_history": latest_orchestrator_state.get("repair_history", []),
+            "final_lint_passed": latest_orchestrator_state.get("lint_results", {}).get("passed", False),
+            "final_test_passed": latest_orchestrator_state.get("test_results", {}).get("passed", False)
+        }
+    return {"status": "idle", "message": "No reflection history available."}
+
+
+# --- Phase V6.3: Human-in-the-Loop Approval Endpoints ---
+
+@app.post("/api/execution/approve")
+async def api_execution_approve(payload: dict = None):
+    """Resumes a paused pipeline execution following human approval."""
+    global current_approval_event, latest_orchestrator_state
+    if current_approval_event and latest_orchestrator_state:
+        notes = payload.get("notes", "Approved by user") if payload else "Approved by user"
+        latest_orchestrator_state["approval_status"] = "APPROVED"
+        latest_orchestrator_state["human_notes"] = notes
+        current_approval_event.set()
+        log_event("hitl_approval_received", action="approved", notes=notes)
+        return {"status": "success", "action": "approved"}
+    raise HTTPException(status_code=400, detail="No pipeline currently waiting for approval.")
+
+
+@app.post("/api/execution/reject")
+async def api_execution_reject(payload: dict = None):
+    """Halts a paused pipeline execution following human rejection."""
+    global current_approval_event, latest_orchestrator_state
+    if current_approval_event and latest_orchestrator_state:
+        notes = payload.get("notes", "Rejected by user") if payload else "Rejected by user"
+        latest_orchestrator_state["approval_status"] = "REJECTED"
+        latest_orchestrator_state["human_notes"] = notes
+        current_approval_event.set()
+        log_event("hitl_approval_received", action="rejected", notes=notes)
+        return {"status": "success", "action": "rejected"}
+    raise HTTPException(status_code=400, detail="No pipeline currently waiting for approval.")
+
+
+# --- Phase V6.5: Persistent Memory Endpoints ---
+
+@app.get("/api/memory/history")
+async def api_memory_history():
+    """Returns persistent session history and self-repair solution patterns across runs."""
+    return get_memory_history()
+
+
+# --- Phase V6.6: Plugin Ecosystem Endpoints ---
+
+@app.get("/api/plugins")
+async def api_plugins():
+    """Returns active plugins and extension hooks loaded in the orchestrator."""
+    return {"plugins": plugin_registry.get_loaded_plugins()}
 
 
 # --- WebSocket Orchestration Route ---
@@ -174,6 +281,17 @@ async def websocket_orchestrate(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            
+            # Check for WebSocket-based approval responses
+            action = data.get("action")
+            if action in ["approve", "reject"]:
+                global current_approval_event, latest_orchestrator_state
+                if current_approval_event and latest_orchestrator_state:
+                    latest_orchestrator_state["approval_status"] = "APPROVED" if action == "approve" else "REJECTED"
+                    latest_orchestrator_state["human_notes"] = data.get("notes", f"{action.capitalize()}d via WebSocket")
+                    current_approval_event.set()
+                continue
+
             prompt = data.get("prompt", "")
             if prompt:
                 await safe_run_pipeline(websocket, prompt)
