@@ -1,15 +1,13 @@
 # Workspace Documentation
 
 ## Requirement
-Build URL Shortener REST API with FastAPI
+Build CLI Expense Tracker with SQLite
 
 ## Architecture Intent
-The architectural intent is to design a scalable and secure URL shortener REST API using FastAPI, providing endpoints for shortening and redirecting URLs while ensuring high performance and data integrity.
+The architectural intent is to design a command-line interface (CLI) expense tracking application that utilizes a SQLite database to store and manage user expenses.
 
 ## Generated Modules
-- `main.py`
-- ` requirements.txt`
+- `src/main.py`
+- `src/utils.py`
+- `requirements.txt`
 - `README.md`
-- `database.db`
-- `py.typed`
-- `schema.sql`
