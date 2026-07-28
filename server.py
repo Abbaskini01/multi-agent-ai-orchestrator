@@ -13,6 +13,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.knowledge_graph import build_enterprise_knowledge_graph, analyze_impact_radius
+from core.pm_engine import decompose_requirement_into_milestones, get_current_roadmap
+from core.security import scan_workspace_security, generate_compliance_report
+from core.deployment_intel import get_deployment_targets, configure_canary_release
+from core.collaboration import get_team_presence, add_inline_comment
+from core.ide_integration import generate_inline_completion, get_ide_diagnostics
+from core.analytics import generate_platform_analytics
 from core.cicd_engine import scaffold_cicd_pipelines
 from core.deployment import verify_deployment_health
 from core.config import settings
@@ -363,3 +370,105 @@ async def api_cicd_deploy_verify(payload: dict):
     
     result = await verify_deployment_health(target_url)
     return result
+
+    # --- Phase V7.4: Enterprise Knowledge Graph API Endpoints ---
+
+@app.get("/api/knowledge/graph")
+async def api_knowledge_graph():
+    """Returns the synthesized Enterprise Knowledge Graph (Nodes & Edges)."""
+    return build_enterprise_knowledge_graph()
+
+
+@app.get("/api/knowledge/impact")
+async def api_knowledge_impact(target: str):
+    """Computes the blast radius impact analysis for a given target symbol or file path."""
+    if not target:
+        raise HTTPException(status_code=400, detail="target parameter is required")
+    return analyze_impact_radius(target)
+
+# --- Phase V7.5: AI Project Manager API Endpoints ---
+
+@app.post("/api/pm/decompose")
+async def api_pm_decompose(payload: dict):
+    """Decomposes a requirement into a structured multi-phase project milestone plan."""
+    requirement = payload.get("requirement")
+    if not requirement:
+        raise HTTPException(status_code=400, detail="requirement string is required")
+    return decompose_requirement_into_milestones(requirement)
+
+
+@app.get("/api/pm/milestones")
+async def api_pm_milestones():
+    """Returns the current project roadmap and milestone breakdown."""
+    return get_current_roadmap()
+# --- Phase V7.6: Security & Compliance API Endpoints ---
+
+@app.post("/api/security/scan")
+async def api_security_scan():
+    """Executes SAST and secret scanning on the workspace sandbox."""
+    return scan_workspace_security()
+
+
+@app.get("/api/security/compliance")
+async def api_security_compliance():
+    """Generates SOC2 / ISO27001 compliance audit readiness report."""
+    return generate_compliance_report()
+
+# --- Phase V7.7: Deployment Intelligence API Endpoints ---
+
+@app.get("/api/deploy/targets")
+async def api_deploy_targets():
+    """Returns active deployment targets, health statuses, and traffic weights."""
+    return get_deployment_targets()
+
+
+@app.post("/api/deploy/canary")
+async def api_deploy_canary(payload: dict):
+    """Configures canary deployment traffic weight distribution."""
+    target = payload.get("target", "production-green")
+    weight = payload.get("weight", 10)
+    return configure_canary_release(canary_target=target, weight=weight)
+
+# --- Phase V7.8: IDE Integrations API Endpoints ---
+
+@app.post("/api/ide/completion")
+async def api_ide_completion(payload: dict):
+    """Provides inline code completions for IDE extensions (VS Code / JetBrains)."""
+    file_path = payload.get("file_path", "main.py")
+    line_number = payload.get("line_number", 1)
+    prefix_code = payload.get("prefix_code", "")
+    return generate_inline_completion(file_path, line_number, prefix_code)
+
+
+@app.get("/api/ide/diagnostics")
+async def api_ide_diagnostics():
+    """Streams active LSP-compatible workspace diagnostics to connected IDE clients."""
+    return get_ide_diagnostics()
+
+# --- Phase V7.9: Team Collaboration API Endpoints ---
+
+@app.get("/api/team/presence")
+async def api_team_presence():
+    """Returns real-time workspace team presence, active sessions, and thread counts."""
+    return get_team_presence()
+
+
+@app.post("/api/team/comment")
+async def api_team_comment(payload: dict):
+    """Attaches an inline comment thread to a workspace file location."""
+    author = payload.get("author", "Anonymous")
+    file_path = payload.get("file_path", "server.py")
+    line = payload.get("line", 1)
+    comment = payload.get("comment", "")
+    
+    if not comment:
+        raise HTTPException(status_code=400, detail="comment text is required")
+        
+    return add_inline_comment(author=author, file_path=file_path, line=line, comment=comment)
+    
+# --- Phase V7.10: Platform Analytics API Endpoint ---
+
+@app.get("/api/analytics/dashboard")
+async def api_analytics_dashboard():
+    """Returns platform-wide telemetry, token consumption, and execution analytics."""
+    return generate_platform_analytics()
