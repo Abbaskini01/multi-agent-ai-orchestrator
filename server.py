@@ -13,6 +13,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.cicd_engine import scaffold_cicd_pipelines
+from core.deployment import verify_deployment_health
 from core.config import settings
 from core.logger import log_event
 from core.metrics import metrics
@@ -342,3 +344,22 @@ async def websocket_orchestrate(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host=settings.host, port=settings.port, reload=False)
+
+# --- Phase V7.3: CI/CD Pipeline Automation & Deployment Endpoints ---
+
+@app.post("/api/cicd/generate")
+async def api_cicd_generate(payload: dict = None):
+    """Scaffolds native CI/CD workflow pipelines for workspace projects."""
+    provider = payload.get("provider", "github") if payload else "github"
+    return scaffold_cicd_pipelines(provider=provider)
+
+
+@app.post("/api/cicd/deploy-verify")
+async def api_cicd_deploy_verify(payload: dict):
+    """Triggers automated post-deployment smoke tests and rollback recommendations."""
+    target_url = payload.get("target_url")
+    if not target_url:
+        raise HTTPException(status_code=400, detail="target_url is required")
+    
+    result = await verify_deployment_health(target_url)
+    return result
