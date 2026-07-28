@@ -21,6 +21,8 @@ from core.tracing import set_request_id, reset_request_id
 from core.git import get_git_status, get_unified_diff, get_commit_history, rollback_to_commit
 from core.memory import get_memory_history, init_memory_db
 from core.plugins import plugin_registry
+from core.multi_repo import discover_workspace_projects, build_cross_repo_dependency_map
+from core.k8s_runner import k8s_runner
 from orchestrator.indexer import index_workspace
 from orchestrator.dep_graph import get_dependency_graph
 from orchestrator.state import OrchestratorState
@@ -270,6 +272,39 @@ async def api_memory_history():
 async def api_plugins():
     """Returns active plugins and extension hooks loaded in the orchestrator."""
     return {"plugins": plugin_registry.get_loaded_plugins()}
+
+
+# --- Phase V7.1: Multi-Repository Intelligence API Endpoints ---
+
+@app.get("/api/workspace/projects")
+async def api_workspace_projects():
+    """Returns a list of all detected sub-projects/repositories in the workspace."""
+    return {"projects": discover_workspace_projects()}
+
+
+@app.get("/api/workspace/cross-graph")
+async def api_workspace_cross_graph():
+    """Returns the cross-repository dependency topology graph."""
+    return build_cross_repo_dependency_map()
+
+
+# --- Phase V7.2: Cloud Sandbox & Kubernetes API Endpoint ---
+
+@app.post("/api/k8s/execute")
+async def api_k8s_execute(payload: dict):
+    """Executes a command inside an ephemeral Kubernetes Cloud Sandbox container."""
+    command = payload.get("command")
+    if not command:
+        raise HTTPException(status_code=400, detail="Command required")
+    
+    exit_code, stdout, stderr = await k8s_runner.run_ephemeral_job(command)
+    return {
+        "k8s_available": k8s_runner.initialized,
+        "command": command,
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr
+    }
 
 
 # --- WebSocket Orchestration Route ---
