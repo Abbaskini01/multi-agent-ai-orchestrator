@@ -6,7 +6,7 @@ import re
 import asyncio
 from typing import Dict, Any, List, Tuple
 from orchestrator.state import OrchestratorState
-from llm.groq import groq_client
+from llm.gemini import gemini_client
 from core.config import settings
 from core.logger import log_event
 from core.memory import get_relevant_repairs, save_repair_memory
@@ -74,15 +74,14 @@ async def run_repair_agent(
     )
 
     fixed_code = original_code
-    if groq_client:
+    if gemini_client:
         try:
-            completion = groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=settings.default_groq_model,
-                temperature=0.2,
-                max_tokens=2500
+            completion = gemini_client.models.generate_content(
+                contents=prompt,
+                model=settings.default_gemini_model,
+                config={"temperature": 0.2}
             )
-            raw = completion.choices[0].message.content.strip()
+            raw = completion.text.strip()
             
             # Clean possible markdown block formatting
             if raw.startswith("```python"):

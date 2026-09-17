@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = Field(default="", env="GEMINI_API_KEY")
     groq_api_key: str = Field(default="", env="GROQ_API_KEY")
-    default_gemini_model: str = Field(default="gemini-2.5-flash", env="DEFAULT_GEMINI_MODEL")
+    default_gemini_model: str = Field(default="gemini-3.8-flash", env="DEFAULT_GEMINI_MODEL")
     default_groq_model: str = Field(default="llama-3.3-70b-versatile", env="DEFAULT_GROQ_MODEL")
     enable_llm_streaming: bool = Field(default=True, env="ENABLE_LLM_STREAMING")
 
@@ -63,8 +63,8 @@ class Settings(BaseSettings):
     def validate_startup_credentials(self) -> None:
         """Fail-fast checks invoked on application startup."""
         if self.app_env == "production":
-            if not self.groq_api_key and not self.gemini_api_key:
-                raise RuntimeError("CRITICAL STARTUP ERROR: At least one LLM API key (GROQ or GEMINI) is required in production mode.")
+            if not self.gemini_api_key:
+                raise RuntimeError("CRITICAL STARTUP ERROR: GEMINI_API_KEY is required in production mode.")
 
         try:
             self.workspace_dir.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 """
-Neural Glass AI Orchestrator — Google Gemini SDK Integration Adapter with Groq Fallback
+Neural Glass AI Orchestrator — Google Gemini SDK Integration Adapter
 """
 
 import re
@@ -9,7 +9,6 @@ from typing import Dict
 from core.config import settings
 from core.logger import log_event
 from llm.retry import create_llm_retry_decorator
-from llm.groq import groq_client
 
 gemini_client = None
 if settings.gemini_api_key:
@@ -22,11 +21,8 @@ if settings.gemini_api_key:
 
 
 def _get_clean_gemini_model() -> str:
-    """Normalizes the Gemini model string to avoid API version mismatch errors."""
-    model = settings.default_gemini_model.replace("-latest", "").strip()
-    if not model.startswith("gemini-"):
-        model = "gemini-1.5-flash"
-    return model
+    """Respect the configured Gemini model without rewriting its ID."""
+    return settings.default_gemini_model
 
 
 @create_llm_retry_decorator("gemini")
@@ -39,28 +35,35 @@ def _exec_gemini_generation_sync(prompt: str, system_instruction: str) -> str:
     return response.text.strip()
 
 
-def _exec_groq_fallback_generation(prompt: str, system_instruction: str) -> Dict[str, str]:
-    """Generates multi-file code structure via Groq Llama 3.3 70B if Gemini fails."""
-    if not groq_client:
-        return {}
+@create_llm_retry_decorator("gemini")
+def _exec_gemini_intent_sync(prompt: str) -> str:
+    response = gemini_client.models.generate_content(
+        model=settings.default_gemini_model,
+        contents=prompt,
+        config={"system_instruction": "You are a software architect assistant. Summarize the technical user requirement into a concise 1-sentence architectural intent."}
+    )
+    return response.text.strip()
+
+
+async def call_gemini_intent(prompt: str) -> str:
+    if not gemini_client:
+        log_event("gemini_client_unconfigured", level="warning")
+        return f"Parsed Intent: {prompt}"
     try:
-        log_event("groq_fallback_code_gen_start", model=settings.default_groq_model)
-        completion = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt}
-            ],
-            model=settings.default_groq_model,
-            response_format={"type": "json_object"}
+        res = await asyncio.wait_for(
+            asyncio.to_thread(_exec_gemini_intent_sync, prompt),
+            timeout=settings.request_timeout_seconds
         )
-        raw_text = completion.choices[0].message.content.strip()
-        parsed = json.loads(raw_text)
-        if isinstance(parsed, dict) and "files" in parsed:
-            return parsed["files"] if isinstance(parsed["files"], dict) else parsed
-        return parsed
+        log_event("gemini_intent_success", intent=res)
+        return res
     except Exception as e:
-        log_event("groq_fallback_code_gen_failed", error=str(e), level="error")
-        return {}
+        log_event("gemini_intent_failed", error=str(e), level="error")
+        return prompt
+
+
+def _exec_groq_fallback_generation(prompt: str, system_instruction: str) -> Dict[str, str]:
+    """Legacy compatibility only; cross-provider fallback is disabled."""
+    return {}
 
 
 def generate_fallback_workspace(requirement: str) -> Dict[str, str]:
@@ -109,13 +112,6 @@ async def call_gemini_generator(requirement: str) -> Dict[str, str]:
                 return parsed_files
         except Exception as e:
             log_event("gemini_generation_failed", error=str(e), level="error")
-
-    # Try Groq AI dynamic generation as secondary live LLM
-    log_event("attempting_groq_code_generation_fallback")
-    groq_files = await asyncio.to_thread(_exec_groq_fallback_generation, requirement, system_instruction)
-    if groq_files and len(groq_files) > 0:
-        log_event("groq_generation_success", files_generated=len(groq_files))
-        return groq_files
 
     log_event("reverting_to_fallback_scaffolding")
     return generate_fallback_workspace(requirement)

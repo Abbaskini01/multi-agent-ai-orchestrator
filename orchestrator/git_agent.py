@@ -3,7 +3,7 @@ Neural Glass AI Orchestrator — AI Commit Message Generator Agent
 """
 
 from core.git import get_unified_diff, create_commit, init_sandbox_repo
-from llm.groq import groq_client
+from llm.gemini import gemini_client
 from core.config import settings
 from core.logger import log_event
 
@@ -26,14 +26,13 @@ async def generate_ai_commit(requirement: str) -> str:
     )
 
     commit_msg = ""
-    if groq_client:
+    if gemini_client:
         try:
-            completion = groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=settings.default_groq_model,
-                max_tokens=60
+            completion = gemini_client.models.generate_content(
+                contents=prompt,
+                model=settings.default_gemini_model
             )
-            commit_msg = completion.choices[0].message.content.strip()
+            commit_msg = completion.text.strip()
         except Exception as e:
             log_event("ai_commit_gen_failed", error=str(e), level="warning")
 

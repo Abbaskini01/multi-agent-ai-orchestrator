@@ -15,8 +15,7 @@ from core.tracing import get_request_id
 from core.git import init_sandbox_repo, get_unified_diff
 from core.memory import save_session_memory
 from core.plugins import plugin_registry
-from llm.groq import call_groq_intent
-from llm.gemini import call_gemini_generator
+from llm.gemini import call_gemini_intent, call_gemini_generator
 from orchestrator.dlp import sanitize_prompt_dlp
 from orchestrator.finops import FinOpsTracker
 from orchestrator.telemetry import emit_pipeline_telemetry
@@ -162,20 +161,20 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
         )
         await asyncio.sleep(0.5)
 
-    # 1. Groq Intent Parsing Node
+    # 1. Gemini Intent Parsing Node
     start_t = time.time()
-    parsed_intent = await call_groq_intent(clean_requirement)
+    parsed_intent = await call_gemini_intent(clean_requirement)
     state["parsed_intent"] = parsed_intent
     server.latest_orchestrator_state = state
 
-    finops_data = finops.calculate_step(140, 60, start_t, f"Groq / {settings.default_groq_model}")
+    finops_data = finops.calculate_step(140, 60, start_t, f"Gemini / {settings.default_gemini_model}")
 
     await emit_pipeline_telemetry(
         websocket,
         "PIPELINE_INITIATED",
         {"user_requirement": clean_requirement, "parsed_intent": parsed_intent},
         "Natural Language Intent Parsing",
-        f"Groq parsed intent: '{parsed_intent}'",
+        f"Gemini parsed intent: '{parsed_intent}'",
         finops_data
     )
     await emit_concept(websocket, "Intent Parsing", "The process where an AI model analyzes raw human text to understand the underlying goal.", "Natural Language Processing", finops_data)

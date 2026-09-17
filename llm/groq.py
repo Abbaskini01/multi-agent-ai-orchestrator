@@ -7,14 +7,8 @@ from core.config import settings
 from core.logger import log_event
 from llm.retry import create_llm_retry_decorator
 
+# Legacy compatibility symbol: Groq is never initialized in Gemini-only mode.
 groq_client = None
-if settings.groq_api_key:
-    try:
-        from groq import Groq
-        groq_client = Groq(api_key=settings.groq_api_key)
-        log_event("groq_sdk_initialized", key_len=len(settings.groq_api_key))
-    except Exception as e:
-        log_event("groq_sdk_init_failed", error=str(e), level="warning")
 
 
 @create_llm_retry_decorator("groq")

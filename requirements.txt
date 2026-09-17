@@ -1,9 +1,39 @@
+# =============================================================
+# Neural Glass AI Orchestrator - Dependency Manifest
+# Generated from a full source-code import audit (Sep 2026).
+# Includes only packages actually imported/executed by THIS project.
+# =============================================================
+
+# --- HTTP / Web / Configuration ---
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 pydantic-settings
-google-genai
-groq
 python-dotenv
-tenacity
+httpx
+requests
 psutil
+
+# --- LLM Providers & LangChain / LangGraph Orchestration ---
+groq
+google-genai
+langchain-core
+langchain-groq
+langchain-google-genai
+langgraph
+
+# --- Code Intelligence / Semantic Indexing (V3 AST + Hybrid RAG) ---
+qdrant-client>=1.7                        # query_points() API requires >= 1.7
+tree-sitter>=0.21,<0.22                   # tree-sitter-languages 1.10.2 needs pre-0.22 Language() API
+tree-sitter-languages
+fastembed
+rank-bm25
+
+# --- Optional / Guarded Integrations (imported by project code) ---
+kubernetes                          # core/k8s_runner.py (try/except ImportError guarded)
+PyJWT                               # workspace_sandbox/jwt_handler.py (sandbox-generated app)
+
+# --- Test / Verification Toolchain (invoked via subprocess by orchestrator/testers.py) ---
+flake8
+mypy
+pytest

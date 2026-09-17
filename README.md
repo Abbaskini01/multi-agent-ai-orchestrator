@@ -1,27 +1,3 @@
-Yes. For a project of this level, the README should **not** be a generic “This project uses LangGraph...” document.
-
-A strong engineering README should answer, in order:
-
-1. **What is this?**
-2. **Why does it exist?**
-3. **What problem does it solve?**
-4. **How does it work?**
-5. **What makes it different?**
-6. **What technologies does it use?**
-7. **How do I run it?**
-8. **What does the generated output look like?**
-9. **How is the architecture organized?**
-10. **What engineering capabilities are implemented?**
-11. **What are its current limitations?**
-12. **Where is it going next?**
-
-For your project specifically, I would also make the README tell the **evolution story from V1 → production-oriented V2**, rather than pretending the system is already equivalent to commercial autonomous coding agents.
-
-Below is the README I would use.
-
----
-
-````markdown
 # Autonomous Multi-Agent AI Software Engineering Orchestrator
 
 > A local AI software engineering system that transforms high-level software requirements into validated, tested, self-correcting, Git-managed project repositories using multi-agent orchestration, LangGraph, Docker sandboxing, AST-based code intelligence, human approval, and multi-model routing.
@@ -1463,15 +1439,4 @@ Deliver
 
 The ultimate goal is to investigate how far a carefully engineered combination of **LLMs, stateful orchestration, deterministic validation, code intelligence, version control, sandboxing, and human oversight** can push autonomous software development.
 
-```
-
-### One important correction before you put this on GitHub
-
-I would **not** claim in the README that the project is literally "production-grade" or "zero-downtime" just because those were labels in the original roadmap. The stronger engineering position is what I've used above: **production-oriented / production-style architecture**.
-
-That distinction matters in an interview. If someone asks, *“Is this production-grade?”*, you can honestly explain the sandboxing, Git patching, validation, HITL, AST analysis, and routing—and also acknowledge the remaining limitations.
-
-Also, for your **Version 2**, the most important architectural change is not adding 20 random files. It is making the **Architect Agent capable of deciding what the repository needs based on the requirement**. A CLI expense tracker, FastAPI backend, ML project, and React application should *not* all receive the same folder structure.
-
-That is the point where your project becomes genuinely interesting.
 ```

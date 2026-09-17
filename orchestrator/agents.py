@@ -5,7 +5,7 @@ Neural Glass AI Orchestrator — Specialized Agent Mesh Nodes
 import asyncio
 from typing import Dict, Any, List
 from orchestrator.state import OrchestratorState
-from llm.groq import groq_client
+from llm.gemini import gemini_client
 from core.config import settings
 from core.logger import log_event
 
@@ -23,14 +23,13 @@ async def run_planner_agent(state: OrchestratorState) -> List[str]:
         "3. Configure database persistence layer",
         "4. Expose CLI / REST application entry points"
     ]
-    if groq_client:
+    if gemini_client:
         try:
-            completion = groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=settings.default_groq_model,
-                max_tokens=150
+            completion = gemini_client.models.generate_content(
+                contents=prompt,
+                model=settings.default_gemini_model
             )
-            raw = completion.choices[0].message.content.strip()
+            raw = completion.text.strip()
             parsed = [line.strip() for line in raw.splitlines() if line.strip()]
             if parsed:
                 steps = parsed
