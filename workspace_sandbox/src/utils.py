@@ -2,6 +2,5 @@
 # Enterprise Security & Quality Inspected
 
 
-# Configuration file
-AWS_ACCESS_KEY = "[REDACTED_AWS_ACCESS_KEY]"
-   
+def helper():
+    return True
