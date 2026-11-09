@@ -1,1442 +1,603 @@
-# Autonomous Multi-Agent AI Software Engineering Orchestrator
+# Neural Glass — Multi-Agent AI Orchestrator
 
-> A local AI software engineering system that transforms high-level software requirements into validated, tested, self-correcting, Git-managed project repositories using multi-agent orchestration, LangGraph, Docker sandboxing, AST-based code intelligence, human approval, and multi-model routing.
+**An educational, runnable multi-agent engineering dashboard.** Describe a small
+application in natural language, watch a LangGraph-style pipeline plan it, generate
+the files with Gemini, gate persistence behind human approval, verify the result
+with real linters/tests, and explain each concept as it happens.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-orange.svg)](https://langchain-ai.github.io/langgraph/)
-[![Docker](https://img.shields.io/badge/Docker-Sandboxed%20Execution-2496ED.svg)](https://www.docker.com/)
-[![Git](https://img.shields.io/badge/Git-Version%20Control-F05032.svg)](https://git-scm.com/)
-[![Status](https://img.shields.io/badge/Status-Active%20Development-green.svg)]()
+![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-state%20machine-1C3C3C)
+![Gemini](https://img.shields.io/badge/LLM-Google%20Gemini-4285F4)
+![Status](https://img.shields.io/badge/status-educational%20project-5EEAD4)
 
----
-
-## Overview
-
-The **Autonomous Multi-Agent AI Software Engineering Orchestrator** is a local AI-powered software engineering system designed to automate the software development lifecycle from a natural-language requirement to a validated project repository.
-
-Instead of treating an LLM as a simple code generator, the system models software development as a coordinated workflow involving specialized agents and deterministic engineering tools.
-
-A typical execution follows:
-
-```text
-User Requirement
-       │
-       ▼
-Architect / Planner
-       │
-       ▼
-Structured Project Blueprint
-       │
-       ▼
-Human Approval
-       │
-       ▼
-Task Decomposition
-       │
-       ▼
-Code Executors
-       │
-       ▼
-Project Workspace
-       │
-       ├───────────────┐
-       ▼               ▼
-Syntax Validation   AST Analysis
-       │
-       ▼
-Runtime Validation
-       │
-       ▼
-Functional Testing
-       │
-       ▼
-Failure?
-   ┌───┴───┐
-   │       │
-  Yes      No
-   │       │
-   ▼       ▼
-Targeted  Continue
-Repair      │
-   │        │
-   └────┐   │
-        ▼   ▼
-      Re-validation
-            │
-            ▼
-       Git-managed
-       Project Output
-            │
-            ▼
-         Complete
-````
-
-The central idea is simple:
-
-> **Generate → Validate → Diagnose → Repair → Re-validate → Deliver**
+![Neural Glass dashboard](docs/assets/dashboard.png)
 
 ---
 
-# Why This Project Exists
+## Contents
 
-Large Language Models are extremely capable at generating code, but generating code is only one part of software engineering.
+1. [Overview](#1-overview)
+2. [Screenshots](#2-screenshots)
+3. [Features](#3-features)
+4. [Technology stack](#4-technology-stack)
+5. [Architecture](#5-architecture)
+6. [Pipeline stages](#6-pipeline-stages)
+7. [Dashboard guide](#7-dashboard-guide)
+8. [Project structure](#8-project-structure)
+9. [Quick start](#9-quick-start)
+10. [Configuration](#10-configuration)
+11. [Telemetry protocol](#11-telemetry-protocol)
+12. [API surface](#12-api-surface)
+13. [Data loss prevention](#13-data-loss-prevention)
+14. [FinOps telemetry](#14-finops-telemetry)
+15. [Verification and sandbox](#15-verification-and-sandbox)
+16. [Testing and validation](#16-testing-and-validation)
+17. [Known limitations](#17-known-limitations)
+18. [Troubleshooting](#18-troubleshooting)
+19. [Roadmap](#19-roadmap)
+20. [Contributing](#20-contributing)
+21. [License](#21-license)
 
-Real software development also requires:
+---
 
-* architecture
-* dependency management
-* project organization
-* testing
-* debugging
-* version control
-* environment isolation
-* documentation
-* human review
-* failure recovery
-* deployment preparation
+## 1. Overview
 
-A naive AI coding workflow looks like:
+Neural Glass is a single-process FastAPI application with two faces:
+
+* a **browser dashboard** (`static/index.html`) that streams orchestration
+  telemetry over one WebSocket and teaches the underlying AI-engineering
+  concepts in a side rail;
+* a **backend** that turns a requirement into a small project on disk and then
+  validates it with the real toolchain (`flake8`, `mypy`, `pytest`).
+
+The runtime is **Gemini-only**. There is no multi-provider routing: every model
+call goes through `llm/gemini.py`, and a deterministic local scaffold is used if
+the model is unavailable. LangChain/LangGraph, the agent roles and the pipeline
+structure are preserved from earlier versions of the project; this revision was
+a documentation and presentation pass, not a re-architecture.
+
+### What a run actually does
 
 ```text
-Prompt
-  ↓
-LLM
-  ↓
-Code
+prompt -> DLP screen -> Gemini intent -> planner agent -> Gemini code generation
+       -> human approval gate -> write files -> security/doc/reviewer agents
+       -> flake8 / mypy / pytest (up to 3 self-repairs) -> index -> git snapshot
+       -> save session memory -> PIPELINE_COMPLETE
 ```
 
-This project explores a more reliable architecture:
+Everything is emitted to the browser as it happens, so the dashboard is a live
+view of the pipeline rather than a progress bar over a black box.
 
-```text
-Requirement
-     ↓
-Planning
-     ↓
-Execution
-     ↓
-Validation
-     ↓
-Diagnosis
-     ↓
-Targeted Repair
-     ↓
-Re-validation
-     ↓
-Version Control
-     ↓
-Project Delivery
+---
+
+## 2. Screenshots
+
+All screenshots below were captured from the running application at
+`http://127.0.0.1:8011/` with headless Chrome.
+
+| Dashboard | Web terminal |
+| --- | --- |
+| ![Dashboard](docs/assets/dashboard.png) | ![Web terminal](docs/assets/web-terminal.png) |
+
+| Concept explainer modal |
+| --- |
+| ![Concept modal](docs/assets/concept-modal.png) |
+
+---
+
+## 3. Features
+
+**Orchestration**
+
+* Sequential, observable pipeline with six UI stages mapped from real backend
+  node events (`planner`, `architect`, `executor`, `agent_mesh`,
+  `verification_runner`).
+* Human-in-the-loop gate before files are persisted; approve/reject is accepted
+  over the WebSocket or the REST endpoint.
+* Parallel security / documentation / reviewer agents over the generated files.
+* Verification loop that runs flake8, mypy and pytest and asks the repair agent
+  to fix failures, with a bounded retry count.
+* Session memory, plugin hooks and a git snapshot at the end of each run.
+
+**Trust and cost visibility**
+
+* DLP screening of the prompt with a live leak counter in the header.
+* FinOps ledger: tokens, estimated USD cost, latency and active model route.
+* Structured JSON logging, request-id tracing and metrics middleware.
+
+**Dashboard**
+
+* Single-page UI, no build step: Tailwind Play CDN, Lucide icons, xterm.js.
+* Live execution stream, generated-file browser, in-browser terminal surface.
+* Teaching rail with an AST view, a 2D embedding-similarity plot and concept
+  history, plus an explainer modal behind every "i" button.
+* Responsive layout down to tablet width, keyboard-friendly controls, ARIA
+  roles on tabs and dialogs.
+
+**Operations**
+
+* Health, liveness and readiness probes.
+* REST endpoints for git, security scanning, knowledge graph, CI/CD scaffolding,
+  deployment targets, team presence and analytics.
+
+---
+
+## 4. Technology stack
+
+| Layer | Choice | Notes |
+| --- | --- | --- |
+| Web framework | FastAPI + Uvicorn | Async routes, WebSocket, middleware |
+| Validation / config | Pydantic + pydantic-settings | `.env` driven `Settings` |
+| LLM | Google Gemini via `google-genai` | Only provider wired into the pipeline |
+| Orchestration | LangGraph + LangChain core | `orchestrator/graph.py` state machine |
+| Code intelligence | tree-sitter, Qdrant client, fastembed, rank-bm25 | Indexing/RAG helpers |
+| Verification | flake8, mypy, pytest | Invoked as subprocesses |
+| Frontend | Tailwind Play CDN, Lucide, xterm.js 5.3 + fit addon | No bundler, no npm |
+| Logging / metrics | JSON logs, in-process metrics registry | Request-id propagation |
+| Container execution | Kubernetes client with local fallback | Guarded imports |
+
+Python 3.11 is the supported runtime; dependencies are pinned by category in
+`requirements.txt`.
+
+---
+
+## 5. Architecture
+
+```mermaid
+flowchart TD
+    A["Browser dashboard<br/>static/index.html"] -->|"GET /"| B["FastAPI server<br/>server.py"]
+    A <-->|"WS /ws/orchestrate<br/>telemetry envelopes"| B
+    B --> C["orchestrator.pipeline<br/>safe_run_pipeline"]
+    C --> D["DLP sanitiser"]
+    C --> E["llm.gemini<br/>intent + generator"]
+    C --> F["agent mesh<br/>planner / security / docs / reviewer"]
+    C --> G["sandbox writer<br/>workspace_sandbox/"]
+    G --> H["verification loop<br/>flake8 / mypy / pytest"]
+    H -->|"failure"| I["repair agent"]
+    I --> H
+    C --> J["indexer + dependency graph"]
+    C --> K["session memory + git snapshot"]
+    B --> L["core.* domain endpoints<br/>git, security, CI/CD, PM, analytics"]
+    M["app.py CLI<br/>LangGraph state machine"] --> N["orchestrator.graph.app"]
 ```
 
-The goal is to investigate how autonomous software engineering systems can be built by combining **LLMs with deterministic software engineering infrastructure**.
+Two entry points exist, deliberately:
+
+* **`server.py`** — the web application and the pipeline the dashboard drives.
+* **`app.py`** — an interactive CLI harness around the compiled LangGraph in
+  `orchestrator/graph.py` (planner → scaffolder → executor → testers →
+  exporter). It is useful for reading the state machine end to end, but it is
+  not the process that serves the UI.
+
+The detailed component map, data contracts and extension points live in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+[`docs/TECHNICAL_DOCUMENTATION.md`](docs/TECHNICAL_DOCUMENTATION.md).
 
 ---
 
-# Core Design Philosophy
+## 6. Pipeline stages
 
-The orchestrator is built around five principles.
+`orchestrator/pipeline.py` numbers its stages in comments; this is what each one
+does and what the UI shows.
 
-### 1. LLMs make decisions; deterministic tools verify them
+| # | Stage | Implementation | Emitted event(s) |
+| --- | --- | --- | --- |
+| 0 | DLP screen | `orchestrator/dlp.py` | `DLP_REDACTION_WARNING` |
+| 1 | Intent parsing | `call_gemini_intent` | `PIPELINE_INITIATED`, `NODE_ACTIVATED` (planner) |
+| 2 | Planning | `run_planner_agent` | `CONCEPT_LEARNED`, `NODE_ACTIVATED` (architect) |
+| 3 | Blueprint | planner output | `ARCHITECT_BLUEPRINT_CREATED` |
+| 4 | Code generation | `call_gemini_generator` | `NODE_ACTIVATED` (executor) |
+| 5 | Human approval | `wait_for_human_approval` | `HUMAN_APPROVAL_REQUESTED` |
+| 6 | Persist files | `write_generated_files_to_sandbox` | `NODE_ACTIVATED` (agent_mesh) |
+| 7 | Agent mesh | security, docs, reviewer | `AGENT_MESH_COMPLETED` |
+| 8 | Verification | `orchestrator/testers.py` + `repair.py` | `VERIFICATION_SUITE_COMPLETED`, `SELF_REPAIR_TRIGGERED` |
+| 9 | Indexing | `index_workspace`, `get_dependency_graph` | `CODEBASE_INDEXED` |
+| 10 | AST telemetry | sample payload | `AST_INDEXED` |
+| 11 | Vector telemetry | sample payload | `VECTORS_EMBEDDED` |
+| 12 | Git snapshot | `generate_ai_commit` | `GIT_SNAPSHOT_CREATED` |
+| 13 | Finish | memory, plugins | `PIPELINE_COMPLETE` |
 
-The LLM can generate code and reason about failures.
+> **Honest note.** Steps 10 and 11 (AST tree and vector plot) send fixed sample
+> payloads so the teaching panel has something meaningful to render. They are
+> not parsed/embedded from the generated files. Step 9 is the real indexing step.
 
-Python, Git, Docker, AST parsing, and test frameworks provide deterministic verification.
+The approval gate waits up to 300 seconds. Approving continues to persistence;
+rejecting emits `PIPELINE_HALTED` and the run stops before anything is written.
 
 ---
 
-### 2. Failure is feedback
+## 7. Dashboard guide
 
-A failed test does not immediately terminate the workflow.
+**Header** — live tokens, estimated cost, latency, DLP status and active model
+route, plus the WebSocket connection pill. The "i" button opens the DLP primer.
 
-Instead:
+**Composer** — free-text requirement, four presets, and the Run button. Enter in
+the input starts a run. The last preset intentionally contains a fake API key so
+you can watch the DLP guardrail trigger.
+
+**Pipeline stepper** — Plan → Architect → Build → Review → Verify → Ship. States
+are driven by the events in the previous section: the active stage is mint, done
+stages keep a filled dot, and a failure marks the running stage red.
+
+**Workspace tabs**
+
+| Tab | What it shows |
+| --- | --- |
+| Execution stream | One row per telemetry event, newest at the bottom, toned by severity |
+| Generated code | File list produced by the run, with the source in the viewer |
+| Web terminal | xterm.js surface with quick commands and paste/clear/copy |
+
+**Teaching rail** — Concepts (current phase + history), AST tree (sample parse
+tree or a node list) and 2D vectors (projection of embedding similarity). Every
+info button explains the concept and how it applies here.
+
+**Modals** — Human approval (payload preview + reviewer notes), GitHub pull
+request form, and the educational explainer.
+
+---
+
+## 8. Project structure
 
 ```text
-Failure
-   ↓
-Error Trace
-   ↓
-LLM Diagnosis
-   ↓
-Repair
-   ↓
-Validation
-```
-
----
-
-### 3. Repair should be targeted
-
-The system should avoid unnecessarily regenerating the entire project.
-
-When possible, only the affected file or code region is modified.
-
----
-
-### 4. Humans remain in control
-
-The system supports a human approval checkpoint before expensive code-generation operations.
-
----
-
-### 5. Generated software should become a real repository
-
-The final result should not be a block of code returned by an LLM.
-
-It should become an organized software project containing source code, tests, documentation, configuration, and version-control metadata.
-
----
-
-# Architecture
-
-The system uses **LangGraph** as the orchestration and state-management layer.
-
-The workflow is represented as a state machine composed of specialized nodes.
-
-```text
-                         ┌─────────────────┐
-                         │ User Requirement│
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Architect       │
-                         │ / Planner       │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Human Approval  │
-                         │ HITL            │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Task Decomposer │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Executor Agents │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Project         │
-                         │ Workspace       │
-                         └────────┬────────┘
-                                  │
-                     ┌────────────┼────────────┐
-                     ▼            ▼            ▼
-                 Syntax        Runtime      Functional
-                 Testing       Testing      Testing
-                     │            │            │
-                     └────────────┼────────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Failure         │
-                         │ Diagnosis       │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ AST-guided      │
-                         │ Targeted Repair │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Git Diff /      │
-                         │ Patch           │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Docker          │
-                         │ Validation      │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │ Project Export  │
-                         └─────────────────┘
-```
-
----
-
-# Multi-Agent Responsibilities
-
-## Architect / Planner Agent
-
-Responsible for transforming the user's natural-language requirement into a structured software blueprint.
-
-It determines:
-
-* project structure
-* modules
-* file responsibilities
-* interfaces
-* acceptance criteria
-* implementation tasks
-
----
-
-## Executor Agent
-
-Responsible for implementing individual project components.
-
-The Executor receives:
-
-* user requirements
-* architectural instructions
-* task descriptions
-* existing code
-* validation errors
-* AST information
-
-and produces or repairs code accordingly.
-
----
-
-## Syntax Validation Agent
-
-Performs static validation before execution.
-
-The current implementation uses Python compilation mechanisms to detect invalid syntax.
-
-```text
-Generated Code
-     ↓
-compile()
-     ↓
-Syntax Valid / Invalid
-```
-
----
-
-## Runtime Validation Agent
-
-Executes generated software and verifies that it can start and run without unhandled runtime failures.
-
-Execution is performed inside an isolated environment when Docker is available.
-
----
-
-## Functional Testing Agent
-
-Tests whether the generated implementation actually satisfies its intended behavior.
-
-The functional validation layer uses generated test suites and assertions rather than relying solely on process exit codes.
-
----
-
-## AST Analysis Agent
-
-Analyzes the structure of the generated code.
-
-The AST layer extracts information such as:
-
-* classes
-* functions
-* methods
-* arguments
-* imports
-* structural relationships
-
-This information is supplied to repair workflows so that the LLM has structural context when diagnosing failures.
-
----
-
-## Human-in-the-Loop Agent
-
-Provides a checkpoint between planning and execution.
-
-The developer can:
-
-```text
-[A] Approve
-[M] Modify
-[Q] Quit
-```
-
-This prevents the system from blindly executing an architecture that the developer has not reviewed.
-
----
-
-## Git Repair Engine
-
-Uses Git-based diff/patch workflows to preserve stable parts of the project while modifying defective components.
-
-Conceptually:
-
-```text
-Existing Repository
-       │
-       ▼
-Failure Diagnosis
-       │
-       ▼
-Target File
-       │
-       ▼
-Generated Patch
-       │
-       ▼
-git diff / patch
-       │
-       ▼
-Updated Repository
-```
-
----
-
-## Multi-Model Router
-
-The orchestrator supports multiple LLM providers.
-
-The current routing strategy uses:
-
-```text
-Primary Model
-Groq / Llama 3.3 70B
-        │
-        │ failure / rate limit / timeout
-        ▼
-Fallback Model
-Google Gemini 2.5 Flash
-```
-
-This improves resilience against provider-specific failures.
-
----
-
-# Three-Tier Quality Control System
-
-A major component of the project is its validation pipeline.
-
-## Gate 1 — Syntax
-
-Checks whether the generated Python code is syntactically valid.
-
-```text
-Source Code
-    ↓
-Python Compiler
-    ↓
-PASS / FAIL
-```
-
----
-
-## Gate 2 — Runtime
-
-Checks whether the application can actually execute.
-
-```text
-Project
-   ↓
-Sandbox
-   ↓
-Python Process
-   ↓
-Exit Code / Runtime Trace
-```
-
-Timeouts and runtime exceptions are captured and converted into repair feedback.
-
----
-
-## Gate 3 — Functional
-
-Checks whether the implementation behaves according to its intended requirements.
-
-For example:
-
-```text
-Requirement:
-"Add an expense"
-
-        ↓
-
-Functional Test:
-
-Create expense
-      ↓
-Query database
-      ↓
-Verify record exists
-```
-
-This distinguishes:
-
-> "The program runs"
-
-from:
-
-> "The program actually works."
-
----
-
-# Self-Healing Architecture
-
-When validation fails, the orchestrator does not immediately terminate.
-
-Instead, the error becomes part of the next reasoning cycle.
-
-```text
-             ┌─────────────────────┐
-             │ Generated Project   │
-             └──────────┬──────────┘
-                        │
-                        ▼
-                 ┌─────────────┐
-                 │ Validation  │
-                 └──────┬──────┘
-                        │
-                 ┌──────┴──────┐
-                 │             │
-                PASS          FAIL
-                 │             │
-                 ▼             ▼
-              Continue      Diagnose
-                               │
-                               ▼
-                         AST Context
-                               │
-                               ▼
-                         LLM Repair
-                               │
-                               ▼
-                         Git Patch
-                               │
-                               ▼
-                          Validation
-```
-
-A retry/circuit-breaker mechanism prevents infinite repair loops.
-
----
-
-# Docker Sandboxing
-
-Generated code is potentially untrusted.
-
-Therefore, runtime and functional validation can be executed inside ephemeral Docker containers.
-
-The intended environment is based on:
-
-```text
-python:3.11-slim
-```
-
-The container provides an isolated execution boundary between generated code and the host environment.
-
-The system also supports a local subprocess fallback when Docker is unavailable.
-
----
-
-# Git-Based Surgical Repair
-
-One of the key architectural improvements is the transition from full-project regeneration to targeted modification.
-
-### Earlier approach
-
-```text
-Failure
-  ↓
-Regenerate entire project
-```
-
-### Current approach
-
-```text
-Failure
-  ↓
-Identify affected component
-  ↓
-Analyze AST / traceback
-  ↓
-Generate targeted repair
-  ↓
-Apply Git diff
-```
-
-This reduces unnecessary modifications and helps preserve working code.
-
----
-
-# Project Generation
-
-The long-term Version 2 architecture is designed to generate complete repositories rather than only two Python files.
-
-A generated project can evolve toward a structure such as:
-
-```text
-generated_projects/
-└── ExpenseTracker/
-    │
-    ├── README.md
-    ├── LICENSE
-    ├── requirements.txt
-    ├── pyproject.toml
-    ├── .env.example
-    ├── .gitignore
-    ├── Dockerfile
-    ├── docker-compose.yml
-    │
-    ├── src/
-    │   ├── main.py
-    │   ├── database.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── crud.py
-    │   ├── schemas.py
-    │   ├── config.py
-    │   ├── logger.py
-    │   ├── validators.py
-    │   └── exceptions.py
-    │
-    ├── tests/
-    │   ├── test_database.py
-    │   ├── test_models.py
-    │   └── test_services.py
-    │
-    ├── docs/
-    │   └── architecture.md
-    │
-    ├── scripts/
-    │   └── seed_database.py
-    │
-    └── .github/
-        └── workflows/
-            └── python.yml
-```
-
-The exact structure should be determined dynamically by the architecture generated for the user's requirement.
-
----
-
-# Version 1 — Completed Capabilities
-
-The first major version of the system was developed through ten phases.
-
-### Phase 1 — Architecture & State Graph
-
-Established the LangGraph workflow and shared state model.
-
----
-
-### Phase 2 — Planner & Executor
-
-Introduced structured task decomposition and LLM-powered code generation.
-
----
-
-### Phase 3 — Three-Tier Validation
-
-Introduced:
-
-* syntax validation
-* runtime validation
-* functional validation
-
----
-
-### Phase 4 — Self-Correction & Notifications
-
-Added:
-
-* automatic repair loops
-* retry limits
-* Telegram notifications
-
----
-
-### Phase 5 — Workspace Export & Git
-
-Added:
-
-* persistent project export
-* README generation
-* `.gitignore`
-* Git repository initialization
-* commit tracking
-
----
-
-### Phase 6 — Git Diff Surgical Patching
-
-Replaced destructive full-project repair with targeted Git-based modifications.
-
----
-
-### Phase 7 — Human-in-the-Loop
-
-Added developer approval before code generation.
-
----
-
-### Phase 8 — Docker Sandboxing
-
-Moved validation into isolated Docker environments with local fallback support.
-
----
-
-### Phase 9 — AST Code Intelligence
-
-Added structural code analysis and symbol extraction for repair context.
-
----
-
-### Phase 10 — Multi-Model Routing
-
-Added primary/fallback LLM routing using:
-
-* Groq Llama 3.3 70B
-* Google Gemini 2.5 Flash
-
----
-
-# The Five Engineering Pillars
-
-Version 1 established five major engineering capabilities.
-
-| Pillar | Capability                 | Purpose                             |
-| ------ | -------------------------- | ----------------------------------- |
-| 1      | Git Integration & Patching | Preserve stable code during repairs |
-| 2      | Human-in-the-Loop          | Maintain developer control          |
-| 3      | Container Sandboxing       | Isolate generated code              |
-| 4      | AST Code Intelligence      | Understand code structure           |
-| 5      | Multi-Model Routing        | Improve LLM resilience              |
-
----
-
-# Version 2 — Advanced Repository Engineering
-
-Version 2 focuses on moving from a **multi-file code generator** toward a **complete software repository engineering system**.
-
-The major architectural transformation is:
-
-```text
-VERSION 1
-
-Requirement
-    ↓
-Planner
-    ↓
-Executor
-    ↓
-Validation
-    ↓
-Repair
-    ↓
-Export
-```
-
-to:
-
-```text
-VERSION 2
-
-Requirement
-      ↓
-Architect
-      ↓
-Project Blueprint
-      ↓
-Human Approval
-      ↓
-Project Scaffolding
-      ↓
-Dependency Planning
-      ↓
-Parallel Execution
-      ↓
-Validation
-      ↓
-AST Intelligence
-      ↓
-Targeted Repair
-      ↓
-Documentation
-      ↓
-Testing
-      ↓
-CI/CD
-      ↓
-Docker
-      ↓
-Git
-      ↓
-Complete Repository
-```
-
----
-
-## Version 2 Planned Components
-
-### Architect Agent
-
-Designs the complete repository before implementation.
-
----
-
-### Project Scaffolder
-
-Creates:
-
-* directories
-* package structure
-* configuration structure
-* testing structure
-* documentation structure
-
----
-
-### Dependency Agent
-
-Determines and generates:
-
-* `requirements.txt`
-* `pyproject.toml`
-* environment configuration
-* dependency metadata
-
----
-
-### Documentation Agent
-
-Generates:
-
-* README
-* architecture documentation
-* usage documentation
-* API documentation where applicable
-
----
-
-### Testing Planner
-
-Creates project-specific tests based on requirements and acceptance criteria.
-
----
-
-### Configuration Agent
-
-Handles:
-
-* environment variables
-* application configuration
-* logging configuration
-* runtime settings
-
----
-
-### CI/CD Agent
-
-Generates appropriate CI configuration such as:
-
-```text
-.github/
-└── workflows/
-    └── python.yml
-```
-
----
-
-### Deployment Agent
-
-Determines whether deployment configuration is required and generates appropriate artifacts.
-
----
-
-### Parallel Execution
-
-Independent tasks should eventually be executed concurrently rather than forcing every file through a sequential pipeline.
-
-This is intended to improve throughput while preserving dependency ordering where required.
-
----
-
-# Example
-
-A user could provide:
-
-```text
-Build a REST API for managing student records.
-```
-
-The system should not simply produce:
-
-```text
-app.py
-database.py
-```
-
-Instead, the Architect should determine an appropriate repository structure, potentially including:
-
-```text
-student-api/
-
-src/
-    main.py
-    models.py
-    schemas.py
-    database.py
-    services.py
-    routes/
-        students.py
-    config.py
-
-tests/
-    test_students.py
-    test_services.py
-
-docs/
-    architecture.md
-
-.github/
-    workflows/
-        tests.yml
-
-Dockerfile
-requirements.txt
-pyproject.toml
-.env.example
-.gitignore
-README.md
-```
-
-The exact structure remains architecture-dependent.
-
----
-
-# Technology Stack
-
-## Core
-
-* Python 3.11+
-* LangGraph
-* LangChain
-* Groq
-* Google Gemini
-
-## AI / LLM
-
-* Llama 3.3 70B
-* Gemini 2.5 Flash
-* Multi-model fallback routing
-
-## Software Engineering
-
-* Git
-* Git diff / patch workflows
-* Python AST
-* unittest / functional testing
-* subprocess execution
-
-## Sandboxing
-
-* Docker
-* `python:3.11-slim`
-
-## Infrastructure
-
-* Temporary workspaces
-* Persistent project export
-* Environment variables
-* Telegram notifications
-
----
-
-# Repository Structure
-
-The orchestrator itself is being evolved toward a modular architecture.
-
-A target structure is:
-
-```text
-multi-agent-ai-orchestrator/
-
-├── orchestrator/
-│   ├── agents/
-│   │   ├── architect.py
-│   │   ├── planner.py
-│   │   ├── executor.py
-│   │   ├── tester.py
-│   │   └── repair.py
-│   │
-│   ├── validators/
-│   │   ├── syntax.py
-│   │   ├── runtime.py
-│   │   └── functional.py
-│   │
-│   ├── tools/
-│   │   ├── git.py
-│   │   ├── docker.py
-│   │   └── filesystem.py
-│   │
-│   ├── ast_parser.py
-│   ├── router.py
-│   ├── state.py
-│   └── notifications.py
-│
-├── tests/
-│
-├── generated_projects/
-│
-├── docs/
-│
-├── app.py
+neural-glass/
+├── server.py                  # FastAPI composition root, all REST routes + websocket
+├── app.py                     # interactive CLI harness for the LangGraph state machine
 ├── requirements.txt
 ├── .env.example
-├── .gitignore
-└── README.md
+├── static/
+│   ├── index.html             # entire dashboard (markup + CSS + client logic)
+│   └── favicon.svg
+├── orchestrator/
+│   ├── pipeline.py            # the 14-stage run used by the dashboard
+│   ├── graph.py               # compiled LangGraph state machine (CLI path)
+│   ├── state.py               # shared OrchestratorState TypedDict + factory
+│   ├── agents.py              # planner / security / doc / reviewer agents
+│   ├── testers.py             # flake8, mypy, pytest runners
+│   ├── repair.py              # error classification + repair agent
+│   ├── sandbox.py             # writes generated files into workspace_sandbox/
+│   ├── indexer.py             # symbol indexing
+│   ├── dep_graph.py           # dependency graph
+│   ├── dlp.py                 # secret detection + redaction
+│   ├── finops.py              # token/cost/latency ledger
+│   ├── telemetry.py           # envelope helper
+│   └── git_agent.py           # AI commit message
+├── llm/
+│   ├── gemini.py              # Gemini client + async adapter + fallback scaffold
+│   └── retry.py               # retry decorator factory
+├── websocket/manager.py       # connection registry + envelope emitter
+├── core/                      # config, logging, metrics, tracing, health, domain engines
+├── plugins/                   # plugin hooks loaded at runtime
+├── workspace_sandbox/         # generated project output + git repo
+├── tests/                     # empty; no automated suite yet
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── TECHNICAL_DOCUMENTATION.md
+│   ├── API_DOCUMENTATION.md
+│   ├── SETUP_GUIDE.md
+│   ├── DEPLOYMENT.md
+│   ├── README.md              # documentation index
+│   └── assets/                # screenshots used in this README
+└── local_orchestrator/        # earlier local variant kept for reference
 ```
-
-The exact structure may change as the Version 2 architecture evolves.
 
 ---
 
-# Installation
-
-## 1. Clone the repository
+## 9. Quick start
 
 ```bash
+# 1. clone and enter the project
 git clone https://github.com/Abbaskini01/multi-agent-ai-orchestrator.git
 cd multi-agent-ai-orchestrator
-```
 
----
-
-## 2. Create a virtual environment
-
-### Windows
-
-```bash
+# 2. create an environment
 python -m venv venv
-venv\Scripts\activate
-```
+source venv/Scripts/activate      # Windows (Git Bash)
+# source venv/bin/activate        # macOS / Linux
 
-### Linux / macOS
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
----
-
-## 3. Install dependencies
-
-```bash
+# 3. install dependencies
 pip install -r requirements.txt
+
+# 4. configure the one mandatory secret
+cp .env.example .env
+#    then set GEMINI_API_KEY in .env (never commit it)
+
+# 5. run (uvicorn is the supported entry point)
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
----
-
-# Environment Configuration
-
-Create a local `.env` file:
-
-```env
-GROQ_API_KEY=your_groq_api_key
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_telegram_chat_id
-
-GOOGLE_API_KEY=your_google_api_key
-```
-
-Never commit `.env` to Git.
-
-The repository provides `.env.example` as a safe configuration template.
-
----
-
-# Running the Orchestrator
-
-Run:
+Open <http://127.0.0.1:8000/>. Sanity check the backend:
 
 ```bash
-python app.py
+curl http://127.0.0.1:8000/healthz
+curl http://127.0.0.1:8000/api/plugins
 ```
 
-The orchestrator will initialize the workflow and process the configured requirement.
+The startup log prints `gemini_sdk_initialized` with the **length** of the key,
+never the key itself. A missing key is not fatal: the pipeline then uses the
+deterministic fallback scaffold.
 
-The generated project then passes through the orchestration and validation pipeline.
+Deeper instructions, including a Windows-specific walkthrough and offline mode,
+are in [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md).
+
+> **Do not use `python server.py`.** Running the file as `__main__` breaks the
+> deliberate `pipeline` ↔ `server` import cycle. Start it as the `server`
+> module with uvicorn, exactly as above.
+
+> **Before your first real run:** `workspace_sandbox/` contains tracked sample
+> files that a run overwrites. Commit or copy anything you care about, or point
+> `WORKSPACE_DIR` somewhere else.
 
 ---
 
-# Example Workflow
+## 10. Configuration
 
-Input:
+Settings are read from the environment or a root `.env` file by
+`core/config.py` (`pydantic-settings`).
 
-```text
-Build a minimal command-line Python expense tracker.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | *(empty)* | Gemini credential; required for live generation |
+| `DEFAULT_GEMINI_MODEL` | `gemini-3.8-flash` | Model id passed to every call |
+| `APP_NAME` | `Neural Glass AI Orchestrator` | Title in OpenAPI and logs |
+| `APP_VERSION` | `4.2.0` | Reported by health and root fallback |
+| `APP_ENV` | `production` | `development` relaxes startup validation |
+| `DEBUG` | `false` | Verbose error responses |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` | Server binding |
+| `CORS_ORIGINS` | `["*"]` | JSON list of allowed origins |
+| `LOG_LEVEL` | `INFO` | Root log level |
+| `JSON_LOGGING` | `true` | Structured logs when true |
+| `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout applied to each model call |
+| `MAX_API_RETRIES` | `3` | Retry attempts for model transport errors |
+| `DLP_ENABLED` | `true` | Enable prompt secret screening |
+| `SECRET_SCANNING_ENABLED` | `true` | Enable secret pattern scanning |
+| `WORKSPACE_DIR` | `workspace_sandbox/` | Where generated projects are written |
+| `WS_TIMEOUT_SECONDS` | `60` | WebSocket idle timeout |
+
+`GROQ_API_KEY` / `DEFAULT_GROQ_MODEL` still exist in the settings model for
+backwards compatibility but **nothing in the pipeline uses them**. Leaving them
+unset is expected.
+
+Telegram variables in `.env.example` are placeholders for the notifier agent and
+are optional.
+
+---
+
+## 11. Telemetry protocol
+
+One WebSocket endpoint carries a run: `ws://<host>/ws/orchestrate`.
+
+**Client → server**
+
+```json
+{ "action": "START_PIPELINE", "prompt": "Build CLI Expense Tracker with SQLite" }
+{ "action": "approve", "notes": "looks good" }
+{ "action": "reject",  "notes": "unsafe file writes" }
 ```
 
-The system performs:
+The server reads `prompt`; `action` is accepted but optional for a start message.
+`EXECUTE_COMMAND` is sent by the terminal panel but is **not handled** by the
+server (see limitations).
 
-```text
-1. Requirement analysis
-2. Architecture planning
-3. Task decomposition
-4. Human approval
-5. Code generation
-6. Workspace construction
-7. Syntax validation
-8. Runtime validation
-9. Functional testing
-10. AST analysis
-11. Failure diagnosis
-12. Targeted repair
-13. Git patching
-14. Docker validation
-15. Project export
-16. Notification
+**Server → client** — every message has the same envelope:
+
+```json
+{
+  "type": "NODE_ACTIVATED",
+  "event": "NODE_ACTIVATED",
+  "data": { "node_id": "executor", "node_name": "Executor Agent", "phase": "Code Generation" },
+  "title": "Active Concept Recorded",
+  "description": "Learned about executor",
+  "finops": { "total_tokens": 1840, "total_cost_usd": 0.000221, "latency_ms": 940, "model_route": "gemini-3.8-flash" }
+}
 ```
 
----
+The dashboard only relies on `event`, `data` and `finops`. `type` is retained for
+older clients.
 
-# Failure Recovery
+**Events the UI reacts to**
 
-Suppose generated code produces:
+| Event | UI effect |
+| --- | --- |
+| `HUMAN_APPROVAL_REQUESTED` | Opens the approval modal with the payload preview |
+| `DLP_REDACTION_WARNING` | Increments the leak counter, warns in the stream |
+| `NODE_ACTIVATED` | Advances the stepper, updates the phase label |
+| `CONCEPT_LEARNED` | Updates the concept card and appends history |
+| `AST_INDEXED` | Renders the parse tree |
+| `VECTORS_EMBEDDED` | Plots the embedding points |
+| `CODEBASE_INDEXED` | Marks indexing complete (Ship stage) |
+| `PIPELINE_COMPLETE` | Fills the file list, enables export, marks all stages done |
+| `PIPELINE_HALTED` / `PIPELINE_ERROR` | Marks the running stage red, re-enables Run |
 
-```text
-ModuleNotFoundError
-```
-
-The workflow can process the failure as:
-
-```text
-Runtime Failure
-      ↓
-Traceback captured
-      ↓
-Affected module identified
-      ↓
-AST structure inspected
-      ↓
-LLM receives relevant context
-      ↓
-Repair generated
-      ↓
-Git diff applied
-      ↓
-Syntax validation
-      ↓
-Runtime validation
-      ↓
-Functional validation
-```
-
-The system only considers the workflow successful after the required validation stages pass.
+Anything else is still appended to the stream as a neutral row, so the log never
+silently drops an event.
 
 ---
 
-# Security Considerations
+## 12. API surface
 
-Generated code is potentially unsafe.
+The live route table has **36 routes**. The complete, current reference — with
+request bodies, response shapes and known gaps — is
+[`docs/API_DOCUMENTATION.md`](docs/API_DOCUMENTATION.md). Summary:
 
-For this reason, the project incorporates sandboxed execution using Docker where available.
+| Group | Routes |
+| --- | --- |
+| System | `GET /`, `/healthz`, `/livez`, `/readyz` |
+| Orchestration | `POST /api/execution/run`, `/approve`, `/reject`; `GET /reflection`, `/test-report`; `GET /api/agents/state` |
+| Git | `GET /api/git/status`, `/diff`, `/commits`; `POST /api/git/rollback` |
+| Code intelligence | `GET /api/codebase/graph`, `/symbols`, `/api/workspace/projects`, `/cross-graph` |
+| Knowledge | `GET /api/knowledge/graph`, `/impact` |
+| Security | `POST /api/security/scan`; `GET /api/security/compliance` |
+| Delivery | `POST /api/cicd/generate`, `/deploy-verify`, `/deploy/canary`; `GET /api/deploy/targets` |
+| IDE / team | `POST /api/ide/completion`; `GET /api/ide/diagnostics`; `GET /api/team/presence`; `POST /api/team/comment` |
+| Platform | `GET /api/analytics/dashboard`, `/api/pm/milestones`, `/api/memory/history`, `/api/plugins`; `POST /api/pm/decompose`, `/api/k8s/execute` |
+| Realtime | `WS /ws/orchestrate` |
 
-Additional safeguards include:
+FastAPI's generated schema is available at `/docs` while the server is running.
 
-* execution timeouts
-* retry limits
-* isolated workspaces
-* environment-variable based secrets
-* Git-controlled changes
-* human approval checkpoints
-
-However:
-
-> **This project should not be treated as a fully secure execution environment for arbitrary hostile code.**
-
-Docker-based isolation is an engineering safeguard, not an absolute security boundary.
-
-Do not execute untrusted code without appropriate infrastructure and security hardening.
-
----
-
-# Design Trade-offs
-
-This project intentionally combines probabilistic AI components with deterministic engineering infrastructure.
-
-### LLMs
-
-Good at:
-
-* planning
-* code generation
-* debugging
-* reasoning
-* interpreting requirements
-
-### Deterministic systems
-
-Good at:
-
-* compilation
-* testing
-* version control
-* filesystem operations
-* process execution
-* container isolation
-* AST parsing
-
-The architecture therefore avoids relying on the LLM alone to determine whether its own output is correct.
+Two endpoints used by the dashboard do **not** exist on the backend:
+`POST /api/export-zip` (download workspace) and `POST /api/create-pr` (create
+pull request). The buttons are wired but will fail; see limitations.
 
 ---
 
-# Current Limitations
+## 13. Data loss prevention
 
-The project is still an experimental engineering system rather than a replacement for a professional software development organization.
+Before the requirement reaches Gemini it passes through
+`orchestrator/dlp.py`:
 
-Known limitations include:
+1. pattern matching for provider keys and tokens (`sk-…`, `AKIA…`, bearer
+   tokens, password assignments);
+2. the matched spans are replaced with a placeholder;
+3. `DLP_REDACTION_WARNING` is emitted with the leak categories and the sanitized
+   prompt, and the header counter increments.
 
-* LLM-generated architecture can still be imperfect.
-* Generated projects may require additional human review.
-* Model output can vary between executions.
-* Dependency selection can be incorrect.
-* Complex applications may require additional planning iterations.
-* Docker isolation is not equivalent to a hardened production sandbox.
-* Model availability and rate limits depend on external providers.
-* Autonomous software development remains constrained by the reasoning and tool-use capabilities of the underlying models.
+The sanitized text — not the original — is what the planner and generator see.
+This is a pragmatic regex guardrail for demonstration, not a certified DLP
+product: pattern-based detection will miss unusual secret formats.
 
-These limitations are part of the engineering problem the project is designed to explore.
-
----
-
-# Future Development
-
-The long-term roadmap focuses on improving autonomy, reliability, and software-engineering depth.
-
-Potential future capabilities include:
-
-* parallel agent execution
-* dependency-aware task scheduling
-* persistent agent memory
-* semantic code retrieval
-* vector-based project knowledge
-* advanced test generation
-* browser-based application testing
-* API integration testing
-* observability and tracing
-* token and cost tracking
-* execution metrics
-* rollback and checkpointing
-* richer human approval interfaces
-* web-based orchestration dashboard
-* automated deployment workflows
+Try it with the **Test DLP Redaction** preset: the run proceeds with a redacted
+prompt, and the header shows `Active (1 Blocked)`.
 
 ---
 
-# What This Project Demonstrates
+## 14. FinOps telemetry
 
-This project is intended to demonstrate practical understanding of:
+`orchestrator/finops.py` accumulates per-step usage. Each telemetry envelope can
+carry:
 
-### AI Engineering
+| Field | Meaning |
+| --- | --- |
+| `total_tokens` | Cumulative prompt + completion tokens for the run |
+| `total_cost_usd` | Estimated spend from the configured per-token rates |
+| `latency_ms` | Duration of the step that produced the event |
+| `model_route` | Model id that served the call |
 
-* LLM integration
-* multi-agent systems
-* agent orchestration
-* model routing
-* prompt-driven planning
-* structured LLM output
-
-### Software Engineering
-
-* state machines
-* modular architecture
-* automated testing
-* Git workflows
-* patch-based repair
-* dependency management
-* project scaffolding
-
-### AI Reliability
-
-* validation gates
-* self-healing workflows
-* failure feedback loops
-* circuit breakers
-* deterministic verification
-
-### Infrastructure
-
-* Docker
-* sandboxed execution
-* subprocess management
-* filesystem isolation
-* environment configuration
-
-### Code Intelligence
-
-* Python AST
-* symbol extraction
-* dependency awareness
-* structural code analysis
+The dashboard mirrors these into the header on every event. The ledger is
+in-process and resets when a new run starts; it is not persisted billing data.
 
 ---
 
-# Why LangGraph?
+## 15. Verification and sandbox
 
-LangGraph provides a natural abstraction for this project because the orchestrator is fundamentally a **stateful workflow**.
+Generated files are written under `WORKSPACE_DIR` (default
+`workspace_sandbox/`) by `orchestrator/sandbox.py`, which also initialises a git
+repository used for the end-of-run snapshot.
 
-The system must maintain information such as:
+The verification loop (`orchestrator/pipeline.py` step 6) runs, in order:
 
-```text
-user requirement
-project blueprint
-tasks
-generated files
-validation results
-errors
-retry count
-repair state
-```
+1. `flake8` — lint
+2. `mypy` — type check
+3. `pytest` — tests (the generated app may ship its own `tests/`)
 
-and route execution dynamically depending on the state.
+On failure the traceback is classified by `orchestrator/repair.py`, the repair
+agent is asked for corrected files, and the suite reruns. The loop is bounded
+(3 attempts) so a bad generation cannot spin forever. Each attempt emits
+`SELF_REPAIR_TRIGGERED`.
 
-For example:
-
-```text
-Validation PASS
-      ↓
-Continue
-
-Validation FAIL
-      ↓
-Repair
-
-Retry Limit Reached
-      ↓
-Stop
-```
-
-This is naturally represented as a state graph.
+**What "sandbox" means here:** execution is a local subprocess inside the
+workspace directory (with an optional Kubernetes path in `core/k8s_runner.py`
+when a cluster is configured). It is not a hardened container boundary — do not
+run untrusted prompts on a machine you care about.
 
 ---
 
-# Project Philosophy
+## 16. Testing and validation
 
-The objective of this project is not:
+**There is no automated test suite.** The `tests/` directory is empty, and the
+root-level `test_*.py` files are manual helper scripts (one of them sends a
+Telegram message), not collected unit tests. `python -m pytest -q` currently
+collects zero tests and exits successfully.
 
-> "Make an LLM generate code."
+Checks performed for this documentation/UI revision:
 
-The objective is:
+| Check | Result |
+| --- | --- |
+| Server boot (`uvicorn server:app`, port 8011) | 200 on `/`, `/healthz`, `/api/plugins` |
+| OpenAPI diff against pre-change baseline | identical, 36 documented operations |
+| HTML structure parse (tag balance) | no unclosed or stray tags |
+| Client JS syntax (`node --check`) | passes |
+| Headless Chrome interaction pass | tabs, modals, stepper, DLP counter, file viewer and error path all update; **0** JS exceptions |
+| `python -m py_compile` on every edited module | passes |
+| `pytest -q` | runs; 0 tests collected (no suite exists) |
 
-> **Build an engineering system around an LLM that can plan, execute, test, diagnose, repair, and deliver software.**
-
-That distinction drives the architecture.
-
----
-
-# Learning Outcomes
-
-Building this project provides hands-on experience with:
-
-* LLM APIs
-* LangGraph
-* multi-agent orchestration
-* state management
-* structured generation
-* automated testing
-* runtime execution
-* Git automation
-* Docker
-* AST parsing
-* model routing
-* human-in-the-loop workflows
-* software architecture
-* autonomous coding systems
+The interaction pass used synthetic telemetry events to exercise the renderer;
+it validates the presentation logic, not a live model run. A full run requires a
+valid `GEMINI_API_KEY`.
 
 ---
 
-# Project Status
+## 17. Known limitations
 
-**Version 1:** Completed
+These are pre-existing gaps, documented rather than hidden:
 
-**Version 2:** Advanced repository-engineering upgrade in progress
-
-The current objective is to evolve the system from a multi-file code generation and repair engine into a more complete **AI software engineering operating system** capable of constructing and maintaining structured software repositories.
-
----
-
-# Contributing
-
-This project is primarily an experimental learning and engineering project.
-
-Contributions, architectural discussions, and suggestions around:
-
-* agent orchestration
-* AI coding systems
-* software validation
-* sandboxing
-* code intelligence
-* autonomous software engineering
-
-are welcome.
-
----
-
-# License
-
-This project is currently intended for educational and experimental purposes.
-
-Add an appropriate open-source license before distributing the project publicly.
+1. **The web terminal does not execute commands.** The panel opens xterm.js and
+   sends `{"action": "EXECUTE_COMMAND", ...}`, but `server.py` only handles
+   approval actions and `prompt`; no `TERMINAL_OUTPUT` is ever emitted.
+2. **Export and pull-request buttons target missing endpoints.**
+   `/api/export-zip` and `/api/create-pr` are not implemented anywhere in the
+   codebase, so both actions fail with a fetch error.
+3. **AST and vector panels are illustrative.** The backend sends fixed sample
+   payloads for those two events (documented in the pipeline comments).
+4. **`orchestrator/graph.py` is not the web pipeline.** The LangGraph state
+   machine is exercised by `app.py`; the dashboard calls the sequential pipeline
+   in `orchestrator/pipeline.py`.
+5. **DLP is regex-based.** It catches common key formats, not every secret.
+6. **Sandbox isolation is process-level.** Commands run locally; there is no
+   container guarantee unless a Kubernetes context is available.
+7. **Repository hygiene:** `.gitignore` has a malformed line
+   (`Thumbs.dbworkspace_sandbox/`), so `workspace_sandbox/` is tracked and a run
+   overwrites tracked files. Fixing this changes what git tracks, so it was left
+   alone; add the newline if you want the folder ignored.
+8. **No license file** is present in the repository.
+9. **`python server.py` does not start the app.** The pipeline imports
+   `server` back for the HITL event; that resolves when the app is imported as
+   `server` (uvicorn) but not when the file runs as `__main__`.
 
 ---
 
-# Author
+## 18. Troubleshooting
 
-**Abbas Mashak Kini**
+| Symptom | Cause / fix |
+| --- | --- |
+| `● DISCONNECTED` in the header | Backend not running, wrong port, or a proxy stripping WebSocket upgrades. The client retries every 2 s. |
+| Generation falls back to a generic app | `GEMINI_API_KEY` missing/invalid, model id unavailable, or the response was not valid JSON. Check `gemini_generation_failed` in the logs. |
+| Approval modal never appears | The run failed before the gate, or the socket closed. Check the stream for `PIPELINE_ERROR`. |
+| `SyntaxError` on a generated file | The repair loop is bounded at 3 attempts; a persistent failure is reported in the verification event. |
+| Port already in use | `python -m uvicorn server:app --port 8012`. |
+| Blank page | CDN assets (Tailwind, Lucide, xterm, fonts) are blocked. The layout needs them; use a network with access or vendor the assets. |
+| `ModuleNotFoundError` at startup | Dependencies installed into a different interpreter; activate the venv you used for `pip install -r requirements.txt`. |
 
-Computer Science & Engineering
-
-Interested in:
-
-* Artificial Intelligence
-* Machine Learning
-* AI Engineering
-* Multi-Agent Systems
-* Autonomous Software Engineering
-* Developer Tools
+Logs are JSON by default (`JSON_LOGGING=true`) and include `request_id`, which is
+also the WebSocket connection id, so a single run can be filtered end to end.
 
 ---
 
-# Final Perspective
+## 19. Roadmap
 
-Most LLM applications follow:
+* Implement `/api/export-zip` and `/api/create-pr`, or remove the buttons.
+* Wire `EXECUTE_COMMAND` to `orchestrator.runner.run_sandbox_command` and stream
+  `TERMINAL_OUTPUT` back.
+* Replace the sample AST/vector payloads with output from the real indexer.
+* Make the LangGraph state machine and the sequential pipeline one code path.
+* Persist the FinOps ledger per run instead of per process.
+* Add a Playwright end-to-end test for the dashboard.
 
-```text
-Prompt → Response
-```
+---
 
-This project explores a different model:
+## 20. Contributing
 
-```text
-Requirement
-     ↓
-Reason
-     ↓
-Plan
-     ↓
-Build
-     ↓
-Test
-     ↓
-Observe
-     ↓
-Repair
-     ↓
-Verify
-     ↓
-Version
-     ↓
-Deliver
-```
+1. Branch from `main` (`feat/…`, `fix/…`, `docs/…`).
+2. Keep the pipeline's public behaviour and telemetry event names stable — the
+   UI depends on them.
+3. Never commit `.env` or real credentials.
+4. Run `python -m py_compile` over touched modules and the browser pass
+   described above before opening a pull request (there is no unit suite yet).
+5. Describe UI changes with a screenshot in the pull request.
 
-The ultimate goal is to investigate how far a carefully engineered combination of **LLMs, stateful orchestration, deterministic validation, code intelligence, version control, sandboxing, and human oversight** can push autonomous software development.
+---
 
-```
+## 21. License
+
+No license file is included in this repository. Treat the code as
+all-rights-reserved until the maintainer adds one.

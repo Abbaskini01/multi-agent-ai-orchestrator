@@ -1,5 +1,28 @@
 """
-Neural Glass AI Orchestrator — Multi-Agent Workflow Runner with HITL Approval, Persistent Memory & Plugin Engine
+Neural Glass AI Orchestrator — Multi-Agent Workflow Runner
+=========================================================
+
+`run_educational_pipeline` is the single end-to-end run used by the UI. Each
+numbered section emits one or more telemetry envelopes; the browser renders
+them without any additional protocol. Stages, in order:
+
+   0. DLP sanitisation of the incoming requirement
+   1. Gemini intent parsing            (llm.gemini.call_gemini_intent)
+   2. Planner agent                    (orchestrator.agents.run_planner_agent)
+   3. Gemini multi-file code generation(llm.gemini.call_gemini_generator)
+   -- human-in-the-loop gate (approve/reject, 300s timeout) --
+   4. Persist generated files to workspace_sandbox/
+   5. Parallel agent mesh: security, docs, reviewer
+   6. Verification loop: flake8 -> mypy -> pytest, with up to 3 self-repairs
+   7. Codebase indexing (symbol index + dependency graph)
+   8. AST telemetry                    (illustrative sample payload)
+   9. Vector-space telemetry           (illustrative sample payload)
+  10. Git snapshot + AI commit message
+  11. Memory persistence, plugin hooks, PIPELINE_COMPLETE
+
+Honest note on stages 8 and 9: the AST string and the four vector points are
+fixed sample payloads used to teach the UI. They are not parsed or embedded
+from the generated files; stage 7 is the real indexing step.
 """
 
 import time
@@ -36,6 +59,9 @@ from orchestrator.testers import (
     run_pytest_suite
 )
 from orchestrator.repair import classify_error_trace, run_repair_agent
+# The HITL gate needs the two process-wide objects defined in server.py.
+# server imports this module too, so this is a circular import that works
+# because the names are only dereferenced at call time.
 import server
 
 
@@ -117,6 +143,12 @@ async def wait_for_human_approval(
 
 
 async def safe_run_pipeline(websocket: WebSocket, requirement: str):
+    """Run the pipeline and absorb any failure into logs + metrics.
+
+    This is the websocket-facing wrapper: it never re-raises, so a failed
+    run cannot tear down the socket. Errors are recorded as metrics and, by
+    `run_educational_pipeline`, emitted to the client as PIPELINE_ERROR.
+    """
     req_id = get_request_id()
     start_time = time.perf_counter()
     log_event("pipeline_triggered", prompt=requirement, request_id=req_id)
@@ -196,7 +228,7 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     await emit_concept(websocket, "Planner Agent", "Decomposing high-level software goals into explicit step-by-step task graphs.", "Multi-Agent System", finops_data)
     await asyncio.sleep(0.5)
 
-    # 3. Gemini / Groq Code Generation Node
+    # 3. Gemini Code Generation Node — expects a JSON map of filepath -> content
     start_t = time.time()
     await emit_pipeline_telemetry(
         websocket,
@@ -424,6 +456,8 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     await asyncio.sleep(0.5)
 
     # 8. AST Syntax Tree Telemetry
+    # NOTE: the tree below is a fixed sample that demonstrates the shape of a
+    # parse result. It is deliberately not derived from the generated files.
     start_t = time.time()
     finops_data = finops.calculate_step(120, 40, start_t, "Tree-sitter AST Parser")
 
@@ -454,6 +488,8 @@ async def run_educational_pipeline(websocket: WebSocket, requirement: str):
     await asyncio.sleep(0.5)
 
     # 9. Qdrant Vector Embedding Space
+    # NOTE: sample coordinates (and the 1536 dimension below) are illustrative.
+    # No embedding model is called at this step; stage 7 does the real indexing.
     start_t = time.time()
     finops_data = finops.calculate_step(90, 30, start_t, "Qdrant Vector Space")
     

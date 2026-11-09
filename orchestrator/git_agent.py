@@ -2,10 +2,21 @@
 Neural Glass AI Orchestrator — AI Commit Message Generator Agent
 """
 
+import asyncio
+
 from core.git import get_unified_diff, create_commit, init_sandbox_repo
 from llm.gemini import gemini_client
 from core.config import settings
 from core.logger import log_event
+
+
+def _generate_commit_msg_sync(prompt: str) -> str:
+    """Blocking Gemini SDK call for commit message generation (runs in a worker thread)."""
+    completion = gemini_client.models.generate_content(
+        contents=prompt,
+        model=settings.default_gemini_model,
+    )
+    return (completion.text or "").strip()
 
 
 async def generate_ai_commit(requirement: str) -> str:
@@ -28,13 +39,17 @@ async def generate_ai_commit(requirement: str) -> str:
     commit_msg = ""
     if gemini_client:
         try:
-            completion = gemini_client.models.generate_content(
-                contents=prompt,
-                model=settings.default_gemini_model
-            )
-            commit_msg = completion.text.strip()
+            # SDK call is synchronous; run it off the event loop. Per-attempt HTTP
+            # timeout is bounded by the shared Gemini client HttpOptions. No outer
+            # asyncio.wait_for is used (worker threads cannot be forcibly cancelled).
+            commit_msg = await asyncio.to_thread(_generate_commit_msg_sync, prompt)
         except Exception as e:
-            log_event("ai_commit_gen_failed", error=str(e), level="warning")
+            log_event(
+                "ai_commit_gen_failed",
+                error=str(e) or type(e).__name__,
+                error_type=type(e).__name__,
+                level="warning",
+            )
 
     if not commit_msg:
         commit_msg = f"feat: auto-generated implementation for {requirement[:40]}"

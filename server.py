@@ -1,5 +1,27 @@
 """
 Neural Glass AI Orchestrator — Server Composition Root
+=====================================================
+
+This module is the single FastAPI entry point for the backend. It *wires*
+the application together rather than implementing behaviour itself:
+
+* configuration, logging, metrics, tracing -> core.*
+* orchestration pipeline                   -> orchestrator.pipeline
+* websocket fan-out / telemetry envelopes  -> websocket.manager
+* feature domains (git, CI/CD, PM, security, analytics, ...) -> core.*
+
+Run flow for one orchestration:
+    browser  GET /                     -> static/index.html
+    browser  WS  /ws/orchestrate       -> {"action": "START_PIPELINE", "prompt": ...}
+    server   safe_run_pipeline(...)    -> telemetry envelopes back over the socket
+    browser  human-in-the-loop         -> {"action": "approve"|"reject"} or
+                                          POST /api/execution/{approve|reject}
+
+Start it with:  uvicorn server:app
+
+Script mode (`python server.py`) is not supported: this module imports the
+pipeline, which imports `server` back, and that fails when server.py runs as
+__main__ instead of as the `server` module. See README "Known limitations".
 """
 
 import sys
@@ -71,6 +93,9 @@ async def lifespan(app: FastAPI):
     log_event("app_shutdown_complete")
 
 
+# ---------------------------------------------------------------------------
+# Application object. Lifespan validation runs before any request is served.
+# ---------------------------------------------------------------------------
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
@@ -89,7 +114,8 @@ app.add_middleware(
 # Include Operational Probes Router
 app.include_router(health_router)
 
-# Mount Static Files (if directory exists)
+# Serve the dashboard. `static/index.html` is a single-file UI (Tailwind CDN
+# + Lucide + xterm.js) and is returned by GET / below.
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -317,9 +343,19 @@ async def api_k8s_execute(payload: dict):
 
 
 # --- WebSocket Orchestration Route ---
+# One long-lived socket per browser tab carries both directions of a run:
+#   inbound  : START_PIPELINE ({"prompt": ...} is what the pipeline reads)
+#              approve / reject for a pending human-in-the-loop gate
+#              EXECUTE_COMMAND is accepted by the client but not handled here
+#   outbound : telemetry envelopes {event, data, concept?, finops?}
 
 @app.websocket("/ws/orchestrate")
 async def websocket_orchestrate(websocket: WebSocket):
+    """Bridges a browser session to the orchestration pipeline.
+
+    The connection id doubles as the tracing request id so every log line
+    emitted while this socket is active can be correlated with it.
+    """
     conn_id = set_request_id()
     await manager.connect(conn_id, websocket)
     try:
@@ -347,10 +383,6 @@ async def websocket_orchestrate(websocket: WebSocket):
     finally:
         reset_request_id()
 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("server:app", host=settings.host, port=settings.port, reload=False)
 
 # --- Phase V7.3: CI/CD Pipeline Automation & Deployment Endpoints ---
 
@@ -472,3 +504,13 @@ async def api_team_comment(payload: dict):
 async def api_analytics_dashboard():
     """Returns platform-wide telemetry, token consumption, and execution analytics."""
     return generate_platform_analytics()
+
+
+# ---------------------------------------------------------------------------
+# Direct execution. Note that script mode fails on the import cycle described
+# in the module docstring; `uvicorn server:app` is the supported entry point.
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("server:app", host=settings.host, port=settings.port, reload=False)

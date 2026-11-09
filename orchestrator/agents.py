@@ -1,5 +1,16 @@
 """
-Neural Glass AI Orchestrator — Specialized Agent Mesh Nodes
+Neural Glass AI Orchestrator — Specialized Agent Mesh
+=====================================================
+
+Four small agents operate on the shared OrchestratorState:
+
+* planner  — asks Gemini for a 4-step plan (falls back to a fixed plan)
+* security — keyword/pattern scan of the generated sources
+* doc      — writes README.md into the generated file map
+* reviewer — static quality notes
+
+The security and reviewer agents are deterministic heuristics, not model
+calls; only the planner talks to Gemini here.
 """
 
 import asyncio
@@ -10,9 +21,19 @@ from core.config import settings
 from core.logger import log_event
 
 
+def _generate_plan_sync(prompt: str) -> str:
+    """Blocking Gemini plan generation; run only in a worker thread."""
+    completion = gemini_client.models.generate_content(
+        contents=prompt,
+        model=settings.default_gemini_model,
+    )
+    return (completion.text or "").strip()
+
+
 async def run_planner_agent(state: OrchestratorState) -> List[str]:
     """Planner Agent: Breaks down requirement into discrete execution steps."""
     clean_req = state.get("clean_requirement") or state.get("user_requirement", "")
+    # Baseline plan used when the model is unavailable or returns nothing.
     prompt = (
         f"Create a 4-step execution plan for this software requirement: '{clean_req}'.\n"
         f"Return ONLY a numbered list of steps."
@@ -25,14 +46,19 @@ async def run_planner_agent(state: OrchestratorState) -> List[str]:
     ]
     if gemini_client:
         try:
-            completion = gemini_client.models.generate_content(
-                contents=prompt,
-                model=settings.default_gemini_model
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(_generate_plan_sync, prompt),
+                timeout=settings.request_timeout_seconds,
             )
-            raw = completion.text.strip()
             parsed = [line.strip() for line in raw.splitlines() if line.strip()]
             if parsed:
                 steps = parsed
+        except asyncio.TimeoutError:
+            log_event(
+                "planner_agent_failed",
+                error=f"planner_timed_out_after_{settings.request_timeout_seconds}s",
+                level="warning",
+            )
         except Exception as e:
             log_event("planner_agent_failed", error=str(e), level="warning")
 
@@ -47,6 +73,8 @@ async def run_security_agent(state: OrchestratorState) -> List[Dict[str, Any]]:
     findings = []
     generated_files = state.get("generated_files", {})
     
+    # Deliberately simple heuristics: these highlight risky patterns, they are
+    # not a substitute for a real SAST tool.
     for filename, code in generated_files.items():
         if "eval(" in code or "exec(" in code:
             findings.append({"file": filename, "severity": "HIGH", "issue": "Dynamic code execution used"})

@@ -1,5 +1,11 @@
 """
-Neural Glass AI Orchestrator — Unified State Management Definition
+Neural Glass AI Orchestrator — Unified State Definition
+========================================================
+
+`OrchestratorState` is the shared, mutable dictionary passed between graph
+nodes and pipeline stages. It is declared with total=False so any stage may
+read a partially populated state; `create_initial_orchestrator_state` is the
+canonical factory that seeds every field with a neutral value.
 """
 
 from typing import TypedDict, List, Dict, Any

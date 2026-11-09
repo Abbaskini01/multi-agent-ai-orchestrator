@@ -11,8 +11,24 @@ from core.logger import log_event
 SANDBOX_DIR = Path("workspace_sandbox")
 
 
+def _safe_text(value) -> str:
+    """Decode git output robustly (Windows cp1252/non-UTF8) without raising."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    try:
+        return str(value)
+    except Exception:
+        return ""
+
+
 def _run_git_cmd(args: List[str], cwd: Path = SANDBOX_DIR) -> str:
-    """Executes a Git command inside the sandbox directory and returns stdout."""
+    """Executes a Git command inside the sandbox directory and returns stdout.
+
+    Output is decoded as UTF-8 with replacement so non-ASCII/locale-mismatched
+    git output cannot raise decoding errors or produce None/AttributeError.
+    """
     if not cwd.exists():
         cwd.mkdir(parents=True, exist_ok=True)
 
@@ -23,11 +39,31 @@ def _run_git_cmd(args: List[str], cwd: Path = SANDBOX_DIR) -> str:
             cwd=str(cwd.absolute()),
             capture_output=True,
             text=True,
-            check=True
+            encoding="utf-8",
+            errors="replace",
+            check=True,
         )
-        return result.stdout.strip()
+        return _safe_text(result.stdout).strip()
     except subprocess.CalledProcessError as e:
-        log_event("git_cmd_failed", cmd=args, stderr=e.stderr.strip(), level="warning")
+        stderr = _safe_text(getattr(e, "stderr", "")).strip()
+        stdout = _safe_text(getattr(e, "stdout", "")).strip()
+        # Keep meaningful failure context observable while preserving prior
+        # "return empty string on failure" behavior for callers.
+        log_event(
+            "git_cmd_failed",
+            cmd=args,
+            stderr=stderr[:4000] if stderr else stdout[:4000],
+            level="warning",
+        )
+        return ""
+    except Exception as e:
+        log_event(
+            "git_cmd_exception",
+            cmd=args,
+            error=str(e) or type(e).__name__,
+            error_type=type(e).__name__,
+            level="warning",
+        )
         return ""
 
 

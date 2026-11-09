@@ -1,3 +1,17 @@
+"""
+Neural Glass AI Orchestrator — LangGraph State Machine
+======================================================
+
+This module compiles the explicit agent graph: planner -> scaffolder ->
+executor -> syntax_tester -> runtime_tester -> functional_tester -> exporter
+-> notifier. Conditional edges send the state back to the executor when a
+tester reports an error and retries remain (3 by default).
+
+`app` is consumed by app.py, the interactive CLI harness. The web dashboard
+drives orchestrator.pipeline directly, which is the same conceptual flow with
+websocket telemetry attached.
+"""
+
 from langgraph.graph import StateGraph, END
 from orchestrator.state import OrchestratorState
 from orchestrator.planner import planner_node
@@ -56,6 +70,7 @@ workflow.add_node("notifier", notifier_node)
 # Flow Connections
 workflow.set_entry_point("planner")
 
+# After planning the graph pauses at END until a human sets is_approved.
 workflow.add_conditional_edges(
     "planner",
     route_after_planner,
@@ -77,6 +92,8 @@ workflow.add_conditional_edges(
     {"executor": "executor", "functional_tester": "functional_tester"}
 )
 
+# Loop guard: a failing functional run may re-enter the executor at most
+# three times before the graph proceeds to export.
 workflow.add_conditional_edges(
     "functional_tester",
     route_after_functional,

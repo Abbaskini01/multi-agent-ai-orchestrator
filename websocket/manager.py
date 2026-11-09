@@ -1,5 +1,16 @@
 """
-Neural Glass AI Orchestrator — WebSocket Manager with Telemetry Emitter & Graceful Shutdown
+Neural Glass AI Orchestrator — WebSocket Manager
+================================================
+
+Tracks the open orchestration sockets and writes one envelope shape to the
+browser:
+
+    {"type": <event>, "event": <event>, "data": {...},
+     "title": str, "description": str, "finops": {...}}
+
+`type` is kept alongside `event` for older clients; the dashboard reads
+`event`, `data` and `finops`. Sending is best-effort: a socket that fails is
+dropped from the registry instead of raising into the pipeline.
 """
 
 from typing import Dict, Any, Optional
@@ -13,18 +24,21 @@ class ConnectionManager:
         self.active_connections: Dict[str, WebSocket] = {}
 
     async def connect(self, connection_id: str, websocket: WebSocket):
+        """Accept the socket and register it under the tracing connection id."""
         await websocket.accept()
         self.active_connections[connection_id] = websocket
         metrics.set_active_ws_connections(len(self.active_connections))
         log_event("ws_connection_accepted", active_count=len(self.active_connections), connection_id=connection_id)
 
     def disconnect(self, connection_id: str):
+        """Forget a connection and update the active-connection gauge."""
         if connection_id in self.active_connections:
             del self.active_connections[connection_id]
             metrics.set_active_ws_connections(len(self.active_connections))
             log_event("ws_connection_closed", active_count=len(self.active_connections), connection_id=connection_id)
 
     async def broadcast_json(self, data: Dict[str, Any]):
+        """Send the same payload to every socket; prune the ones that fail."""
         disconnected = []
         for conn_id, connection in self.active_connections.items():
             try:

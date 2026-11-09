@@ -1,98 +1,117 @@
-```markdown
-# 🚀 Neural Glass — Deployment & Operations Guide (v1.0.0)
+# Deployment notes
 
-> Operational instructions for deploying Neural Glass in local, containerized Docker, and Kubernetes sandbox environments.
+> There is **no Dockerfile, compose file, Kubernetes manifest or CI workflow in
+> this repository today**. This page describes how to run the app as a service
+> and what to add if you containerise it. It does not claim any of that is
+> already provided.
 
 ---
 
-## 1. Environment Configuration
+## 1. Runtime shape
 
-Neural Glass requires environment configuration via root `.env` or system environment variables:
+One Uvicorn process serves the API, the WebSocket and the static dashboard. It
+keeps in-memory state (connection registry, FinOps ledger, latest run state), so:
 
-```env
-# Mandatory API Keys
-GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AIzaSy...
+* **do not scale horizontally** without moving that state out of the process;
+* run a **single worker** — multiple workers would each have their own registry
+  and HITL event, and a browser could connect to the wrong one.
 
-# Operational Mode
-ENVIRONMENT=production
-LOG_LEVEL=INFO
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1
+```
 
-# Server Binding
-HOST=127.0.0.1
-PORT=8000
+---
 
+## 2. Environment
 
-2. Deploying via Docker Sandbox
-Build Docker Image
-Bash
-docker build -t neural-glass:1.0.0 .
+| Variable | Production guidance |
+| --- | --- |
+| `GEMINI_API_KEY` | Inject from a secret store; never bake into an image |
+| `DEFAULT_GEMINI_MODEL` | Pin explicitly so upgrades are deliberate |
+| `APP_ENV` | `production` |
+| `DEBUG` | `false` |
+| `CORS_ORIGINS` | Replace `["*"]` with your dashboard origin(s) |
+| `LOG_LEVEL` | `INFO` (JSON logs are on by default) |
+| `WORKSPACE_DIR` | A writable volume, not the container's ephemeral layer |
+| `REQUEST_TIMEOUT_SECONDS` | Keep below your proxy timeout |
 
-Run Container
-Bash
-docker run -d \
-  --name neural-glass-app \
-  -p 8000:8000 \
-  -e GROQ_API_KEY="your_groq_key" \
-  -e GEMINI_API_KEY="your_gemini_key" \
-  neural-glass:1.0.0
+---
 
-  3. Kubernetes Sandbox Execution (core/sandbox.py)
-Neural Glass includes a dual-mode execution strategy for code sandboxing:
+## 3. Probes
 
-Primary Track: Attempts to launch an ephemeral K8s Pod inside the active cluster namespace using the kubernetes Python client.
+| Probe | Path | Use |
+| --- | --- | --- |
+| Liveness | `/livez` | Restart the process if it fails |
+| Readiness | `/readyz` | Remove from the load balancer while failing |
+| Health | `/healthz` | Human/ops check with metrics |
 
-Graceful Fallback: If a cluster context is unreachable or missing, the execution engine seamlessly degrades to an isolated local subprocess sandbox within workspace_sandbox/.
+The dashboard itself is `GET /`; the WebSocket is `WS /ws/orchestrate`.
 
-Deployment Manifest (k8s-deployment.yml)
-YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: neural-glass-orchestrator
-  labels:
-    app: neural-glass
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: neural-glass
-  template:
-    metadata:
-      labels:
-        app: neural-glass
-    spec:
-      containers:
-      - name: neural-glass
-        image: neural-glass:1.0.0
-        ports:
-        - containerPort: 8000
-        envFrom:
-        - secretRef:
-            name: neural-glass-secrets
-        resources:
-          limits:
-            cpu: "2"
-            memory: "4Gi"
-          requests:
-            cpu: "500m"
-            memory: "1Gi"
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 10
+---
 
-4. Verification & Post-Deploy Smoke Check
-After starting the application instance, execute a smoke test against the automated verification endpoint:
-PowerShell
-Invoke-RestMethod -Uri "[http://127.0.0.1:8000/api/cicd/deploy-verify](http://127.0.0.1:8000/api/cicd/deploy-verify)" -Method Post -Body '{"target_url": "[http://127.0.0.1:8000/healthz](http://127.0.0.1:8000/healthz)"}' -ContentType "application/json"
-Expected Response:
-{
-  "target_url": "[http://127.0.0.1:8000/healthz](http://127.0.0.1:8000/healthz)",
-  "status_code": 200,
-  "healthy": true,
-  "action": "maintain",
-  "notes": "Deployment healthy"
+## 4. Reverse proxy requirements
+
+The UI is useless if the WebSocket cannot upgrade. For nginx:
+
+```nginx
+location /ws/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 3600s;   # runs include a 300s approval wait
 }
+
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Request-ID $request_id;
+}
+```
+
+`proxy_read_timeout` must exceed the human-approval window, otherwise the socket
+drops mid-run.
+
+---
+
+## 5. If you containerise it
+
+A minimal, correct image needs:
+
+1. Python 3.11 base;
+2. `pip install -r requirements.txt`;
+3. the repo copied to `/app` (the sandbox and `static/` are relative to the code);
+4. a writable volume for `WORKSPACE_DIR`;
+5. `uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1` as the command;
+6. no secrets in layers — pass `GEMINI_API_KEY` at runtime.
+
+Sketch (not shipped):
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV WORKSPACE_DIR=/data/workspace_sandbox
+EXPOSE 8000
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+```
+
+Mount `/data` as a volume. Remember that the pipeline executes subprocesses
+inside that directory — treat the container as trusted-code execution, not as a
+security boundary.
+
+---
+
+## 6. Operational checklist
+
+- [ ] `.env` not committed; keys injected at deploy time
+- [ ] `CORS_ORIGINS` narrowed
+- [ ] `DEBUG=false`
+- [ ] writable workspace volume mounted
+- [ ] proxy WebSocket upgrade verified (`CONNECTED` in the header)
+- [ ] probes wired to `/livez` and `/readyz`
+- [ ] log aggregation picks up JSON lines with `request_id`
+- [ ] single worker confirmed
+- [ ] disk growth from generated projects monitored
